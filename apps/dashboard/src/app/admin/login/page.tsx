@@ -18,10 +18,18 @@ export default function AdminLoginPage() {
     setError(null);
 
     try {
-      const res = await fetchApi('/api/auth/admin-login', {
+      let res = await fetchApi('/api/auth/admin-login', {
         method: 'POST',
         body: JSON.stringify({ username: username.trim(), password })
       });
+
+      if (!res.success) {
+        // Fallback to /api/auth/login
+        res = await fetchApi('/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email: username.trim(), password })
+        });
+      }
 
       if (!res.success || !res.data?.token) {
         throw new Error(res.error?.message || 'Access Denied: Invalid administrator credentials');
