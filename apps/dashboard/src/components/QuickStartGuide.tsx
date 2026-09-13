@@ -174,7 +174,7 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
         version: '1.0.0',
         apiKey: activeKey,
         apiUrl: 'https://dashboard.skyranksolution.com',
-        edgeWsUrl: 'ws://13.62.54.247:8080/tunnel/connect',
+        edgeWsUrl: 'wss://app.skyranksolution.com/tunnel/connect',
         tunnels: tunnelConfigs
       }, null, 2);
 
@@ -187,7 +187,7 @@ echo        TURNAL SECURE LOCAL-TO-PUBLIC AGENT
 echo ========================================================
 echo.
 echo [1/3] Loading configured tunnels from config.json...
-echo [2/3] Connecting to Turnal Edge Server (13.62.54.247:8080)...
+echo [2/3] Connecting to Turnal Edge SSL Gateway (wss://...)...
 echo [3/3] Initiating Approval and Live SSL Routing...
 echo.
 
@@ -290,8 +290,17 @@ async function registerTunnelWithApi(tunnel) {
   } catch (e) {}
 }
 
+function getWsUrl(tunnel) {
+  if (config.edgeWsUrl && !config.edgeWsUrl.includes(':8080')) {
+    return config.edgeWsUrl;
+  }
+  const dom = tunnel.domain || 'app.skyranksolution.com';
+  return \`wss://\${dom}/tunnel/connect\`;
+}
+
 function createTunnelConnection(tunnel) {
   registerTunnelWithApi(tunnel);
+  const targetWsUrl = getWsUrl(tunnel);
   console.log(\`\\x1b[33m⏳ [Port \${tunnel.port}] Connecting to Turnal Edge for \${tunnel.domain}...\\x1b[0m\`);
 
   let ws;
@@ -299,7 +308,7 @@ function createTunnelConnection(tunnel) {
   const activeRequests = new Map();
 
   try {
-    ws = new WS(config.edgeWsUrl);
+    ws = new WS(targetWsUrl);
   } catch (err) {
     console.error(\`\\x1b[31m[Port \${tunnel.port}] Connection error: \${err.message}\\x1b[0m\`);
     setTimeout(() => createTunnelConnection(tunnel), 5000);
