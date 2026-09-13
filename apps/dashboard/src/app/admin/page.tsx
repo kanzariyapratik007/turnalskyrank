@@ -112,17 +112,14 @@ export default function AdminApprovalsPage() {
     }
   };
 
-  const handleReject = async (id: string) => {
-    const reason = prompt('Enter rejection reason (optional):', 'Port or domain policy restricted');
-    if (reason === null) return; // cancelled
-
+  const handleReject = async (id: string, customReason?: string) => {
     setActionLoading(id);
     setFeedbackMessage(null);
     try {
       const res = await fetchApi(`/api/admin/tunnels/${id}/reject`, {
         method: 'POST',
         headers: getAdminAuthHeaders(),
-        body: JSON.stringify({ reason })
+        body: JSON.stringify({ reason: customReason || 'Rejected by administrator' })
       });
       if (res.success) {
         setFeedbackMessage({ type: 'success', text: 'Tunnel rejected successfully.' });
