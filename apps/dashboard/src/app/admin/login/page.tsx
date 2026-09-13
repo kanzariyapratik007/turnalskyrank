@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { fetchApi, setToken } from '../../../lib/api-client';
 import { ShieldCheck, Lock, User, AlertCircle, ArrowRight, KeyRound } from 'lucide-react';
 
 export default function AdminLoginPage() {
@@ -17,24 +18,20 @@ export default function AdminLoginPage() {
     setError(null);
 
     try {
-      const res = await fetch('/api/auth/admin-login', {
+      const res = await fetchApi('/api/auth/admin-login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: username.trim(), password })
       });
 
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error?.message || 'Access Denied: Invalid administrator credentials');
+      if (!res.success || !res.data?.token) {
+        throw new Error(res.error?.message || 'Access Denied: Invalid administrator credentials');
       }
 
       // Save Admin Session Token
-      localStorage.setItem('turnal_admin_token', data.data.token);
-      localStorage.setItem('turnal_admin_user', JSON.stringify(data.data.user));
-
-      // Also set main token so admin API calls work seamlessly
-      localStorage.setItem('turnal_token', data.data.token);
+      setToken(res.data.token);
+      localStorage.setItem('turnal_admin_token', res.data.token);
+      localStorage.setItem('turnal_admin_user', JSON.stringify(res.data.user));
+      localStorage.setItem('turnal_user', JSON.stringify(res.data.user));
 
       router.push('/admin');
     } catch (err: any) {

@@ -36,8 +36,22 @@ export async function fetchApi<T = any>(
       headers,
     });
 
-    const body = await res.json();
-    return body;
+    const text = await res.text();
+    try {
+      const body = JSON.parse(text);
+      return body;
+    } catch {
+      if (!res.ok) {
+        return {
+          success: false,
+          error: { code: 'SERVER_ERROR', message: `Server error (${res.status}): ${res.statusText}` },
+        };
+      }
+      return {
+        success: false,
+        error: { code: 'INVALID_RESPONSE', message: 'Unexpected response from server' },
+      };
+    }
   } catch (err: any) {
     return {
       success: false,
