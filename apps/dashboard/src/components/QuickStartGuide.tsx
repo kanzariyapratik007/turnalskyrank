@@ -1,8 +1,37 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { copyToClipboard } from '../lib/clipboard';
-import { Terminal, Copy, Check, ExternalLink, Globe, Laptop, Server, Zap, Info, ShieldCheck, Download } from 'lucide-react';
+import { fetchApi } from '../lib/api-client';
+import {
+  Terminal,
+  Copy,
+  Check,
+  ExternalLink,
+  Globe,
+  Laptop,
+  Server,
+  Zap,
+  Info,
+  ShieldCheck,
+  Download,
+  Plus,
+  Trash2,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
+  Power
+} from 'lucide-react';
+
+interface PortMapping {
+  id: string;
+  name: string;
+  port: string;
+  subdomain: string;
+  customDomain: string;
+  status?: 'PENDING_APPROVAL' | 'ONLINE' | 'OFFLINE' | 'REJECTED';
+}
 
 interface QuickStartGuideProps {
   apiKey?: string;
@@ -10,36 +39,138 @@ interface QuickStartGuideProps {
 }
 
 export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964cbb3d1ed62d86464df1b9', defaultPort = '3001' }: QuickStartGuideProps) {
-  const [port, setPort] = useState(defaultPort);
-  const [subdomain, setSubdomain] = useState('app');
-  const [baseDomain, setBaseDomain] = useState('skyranksolution.com');
-  const [useNpx, setUseNpx] = useState(true);
+  const [portMappings, setPortMappings] = useState<PortMapping[]>([
+    { id: '1', name: 'App Frontend', port: '3001', subdomain: 'app', customDomain: 'app.skyranksolution.com', status: 'PENDING_APPROVAL' },
+    { id: '2', name: 'API Server', port: '3002', subdomain: 'api', customDomain: 'api.skyranksolution.com', status: 'PENDING_APPROVAL' },
+    { id: '3', name: 'Admin Portal', port: '5000', subdomain: 'admin', customDomain: 'admin.skyranksolution.com', status: 'PENDING_APPROVAL' },
+    { id: '4', name: 'Testing Microservice', port: '8000', subdomain: 'test', customDomain: 'test.skyranksolution.com', status: 'PENDING_APPROVAL' },
+    { id: '5', name: 'Dev Backend', port: '8080', subdomain: 'dev', customDomain: 'dev.skyranksolution.com', status: 'PENDING_APPROVAL' },
+  ]);
 
-  const [copiedCmd, setCopiedCmd] = useState(false);
-  const [copiedUrl, setCopiedUrl] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
-  const sub = subdomain.trim() || 'app';
-  const domain = baseDomain.trim() || 'skyranksolution.com';
-  const fullDomain = `${sub}.${domain}`;
-  const liveUrl = `https://${fullDomain}`;
+  // Load existing user tunnels from API
+  const refreshTunnels = async () => {
+    try {
+      const res = await fetchApi('/api/tunnels');
+      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+        const mapped = res.data.map((t: any, idx: number) => ({
+          id: t.id || String(idx + 1),
+          name: t.name || `Port ${t.localTargetPort}`,
+          port: String(t.localTargetPort || 3000),
+          subdomain: t.subdomain || 'tun',
+          customDomain: t.customDomain || `${t.subdomain}.skyranksolution.com`,
+          status: t.status
+        }));
+        setPortMappings(mapped);
+      }
+    } catch (e) {}
+  };
 
-  const generatedCommand = useNpx
-    ? `turnal tunnel --port ${port || '5173'} --domain ${fullDomain} --edge-ws wss://app.skyranksolution.com/tunnel/connect --api-key ${apiKey}`
-    : `node cli.mjs tunnel --port ${port || '5173'} --domain ${fullDomain} --edge-ws wss://app.skyranksolution.com/tunnel/connect --api-key ${apiKey}`;
+  useEffect(() => {
+    refreshTunnels();
+  }, []);
 
-  const handleCopyCmd = async () => {
-    const success = await copyToClipboard(generatedCommand);
-    if (success) {
-      setCopiedCmd(true);
-      setTimeout(() => setCopiedCmd(false), 2000);
+  const addPortRow = () => {
+    const nextPort = String(3000 + portMappings.length + 1);
+    setPortMappings([
+      ...portMappings,
+      {
+        id: String(Date.now()),
+        name: `Service Port ${nextPort}`,
+        port: nextPort,
+        subdomain: `service-${nextPort}`,
+        customDomain: `service-${nextPort}.skyranksolution.com`,
+        status: 'PENDING_APPROVAL'
+      }
+    ]);
+  };
+
+  const removePortRow = (index: number) => {
+    if (portMappings.length <= 1) return;
+    setPortMappings(portMappings.filter((_, i) => i !== index));
+  };
+
+  const updatePortRow = (index: number, field: keyof PortMapping, value: string) => {
+    const updated = [...portMappings];
+    updated[index] = { ...updated[index], [field]: value };
+    if (field === 'subdomain' && !updated[index].customDomain.includes('.')) {
+      updated[index].customDomain = `${value}.skyranksolution.com`;
+    }
+    setPortMappings(updated);
+  };
+
+  // Submit all ports to API for Admin Approval
+  const handleSubmitAll = async () => {
+    setSaving(true);
+    setFeedback(null);
+    try {
+      const items = portMappings.map(p => ({
+        name: p.name,
+        localTargetPort: parseInt(p.port, 10) || 3000,
+        subdomain: p.subdomain.trim() || `port-${p.port}`,
+        customDomain: p.customDomain.trim() || `${p.subdomain}.skyranksolution.com`,
+        protocol: 'http'
+      }));
+
+      const res = await fetchApi('/api/tunnels/batch', {
+        method: 'POST',
+        body: JSON.stringify({ items })
+      });
+
+      if (res.success) {
+        setFeedback({
+          type: 'success',
+          text: `Successfully submitted ${items.length} port tunnel requests! Pending Admin approval.`
+        });
+        refreshTunnels();
+      } else {
+        setFeedback({
+          type: 'error',
+          text: res.error?.message || 'Failed to submit port configurations'
+        });
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', text: err.message });
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleCopyUrl = async () => {
-    const success = await copyToClipboard(liveUrl);
-    if (success) {
-      setCopiedUrl(true);
-      setTimeout(() => setCopiedUrl(false), 2000);
+  // Download pre-configured agent ZIP
+  const handleDownloadZip = async () => {
+    setDownloading(true);
+    try {
+      const token = localStorage.getItem('turnal_token');
+      const res = await fetch('/api/tunnels/bundle/download', {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : `Bearer ${apiKey}`
+        }
+      });
+
+      if (!res.ok) throw new Error('Failed to generate ZIP bundle');
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'turnal-agent-bundle.zip';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+
+      setFeedback({
+        type: 'success',
+        text: 'Agent ZIP downloaded! Unzip and double-click "run-agent.bat" to start all tunnels.'
+      });
+    } catch (err: any) {
+      setFeedback({ type: 'error', text: err.message });
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -52,21 +183,52 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
             <span className="p-2 rounded-xl bg-sky-50 border border-sky-200 text-sky-600">
               <Zap className="w-5 h-5" />
             </span>
-            <h3 className="text-xl font-bold text-slate-900">Interactive Setup, Domain & Help Guide</h3>
+            <h3 className="text-xl font-bold text-slate-900">Multi-Port Tunnel & Domain Setup</h3>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Expose any local project running on your PC (e.g. Next.js, React, Node, Python) with custom domain support.
+            Configure multiple local ports (e.g. 5 projects) with individual domains, download your ready-to-run agent ZIP, and recover automatically on system reboot.
           </p>
         </div>
-        <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span className="text-xs font-semibold text-emerald-700">Turnal Edge Gateway Online</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={refreshTunnels}
+            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition"
+            title="Refresh Tunnels"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="text-xs font-semibold text-emerald-700">Turnal Gateway Online</span>
+          </div>
         </div>
       </div>
 
-      {/* Step-by-Step Guide Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Feedback Toast */}
+      {feedback && (
+        <div
+          className={`p-4 rounded-2xl border flex items-center justify-between gap-3 text-sm animate-in fade-in duration-200 ${
+            feedback.type === 'success'
+              ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+              : 'bg-rose-50 text-rose-900 border-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {feedback.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            ) : (
+              <XCircle className="w-5 h-5 text-rose-600 shrink-0" />
+            )}
+            <span>{feedback.text}</span>
+          </div>
+          <button onClick={() => setFeedback(null)} className="text-xs font-bold opacity-60 hover:opacity-100">
+            Dismiss
+          </button>
+        </div>
+      )}
 
+      {/* Step 1 & 2 Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Step 1: Run Local Server */}
         <div className="bg-slate-50/80 border border-slate-200 rounded-2xl p-5 space-y-3 relative group hover:border-sky-300 transition-colors">
           <div className="flex items-center justify-between">
@@ -75,182 +237,196 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
             </span>
             <Laptop className="w-4 h-4 text-slate-400" />
           </div>
-          <h4 className="text-sm font-bold text-slate-900">Run your Local Application</h4>
+          <h4 className="text-sm font-bold text-slate-900">Run Local Applications</h4>
           <p className="text-xs text-slate-500">
-            Start your project server on your local machine (e.g. <code className="text-sky-700 font-bold">npm run dev</code>).
+            Keep your local projects running on your PC (e.g. Next.js, Django, FastAPI, Express on ports <code className="text-sky-700 font-bold">3001, 3002, 5000</code>).
           </p>
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 font-mono text-[11px] text-slate-200 space-y-1">
-            <div className="text-emerald-400 font-semibold">✔ Ready on local network:</div>
-            <div className="text-slate-300">- Local: <span className="text-sky-300 font-bold">http://localhost:{port || '3001'}</span></div>
-            <div className="text-slate-400">- Network: http://192.168.1.9:{port || '3001'}</div>
+            <div className="text-emerald-400 font-semibold">✔ Local Network Detected:</div>
+            <div className="text-slate-300">- Ports Configured: <span className="text-sky-300 font-bold">{portMappings.map(p => p.port).join(', ')}</span></div>
+            <div className="text-slate-400">- Target Host: http://localhost</div>
           </div>
         </div>
 
-        {/* Step 2: Configure Local Target Port & Custom Domain */}
+        {/* Step 2: System Boot Persistence */}
         <div className="bg-slate-50/80 border border-slate-200 rounded-2xl p-5 space-y-3 relative group hover:border-indigo-300 transition-colors">
           <div className="flex items-center justify-between">
             <span className="text-xs font-extrabold px-2.5 py-1 rounded-md bg-indigo-100 text-indigo-700 border border-indigo-200">
               STEP 2
             </span>
-            <Server className="w-4 h-4 text-slate-400" />
+            <Power className="w-4 h-4 text-slate-400" />
           </div>
-          <h4 className="text-sm font-bold text-slate-900">Target Port & Custom Domain Setup</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
-            <div>
-              <label className="text-[11px] font-bold text-slate-600 mb-1 block">Local Port</label>
-              <input
-                type="number"
-                value={port}
-                onChange={(e) => setPort(e.target.value)}
-                placeholder="3001"
-                className="w-full bg-white border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-3 py-1.5 text-xs text-slate-900 outline-none font-mono"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] font-bold text-slate-600 mb-1 block">Subdomain</label>
-              <input
-                type="text"
-                value={subdomain}
-                onChange={(e) => setSubdomain(e.target.value)}
-                placeholder="app"
-                className="w-full bg-white border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-3 py-1.5 text-xs text-slate-900 outline-none font-mono"
-              />
-            </div>
-            <div>
-              <label className="text-[11px] font-bold text-slate-600 mb-1 block">Main Domain</label>
-              <input
-                type="text"
-                value={baseDomain}
-                onChange={(e) => setBaseDomain(e.target.value)}
-                placeholder="skyranksolution.com"
-                className="w-full bg-white border border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-3 py-1.5 text-xs text-slate-900 outline-none font-mono"
-              />
-            </div>
+          <h4 className="text-sm font-bold text-slate-900">Auto-Recovery on PC Reboot</h4>
+          <p className="text-xs text-slate-500">
+            If power goes out or Windows restarts, the pre-bundled <code className="text-indigo-700 font-bold">install-autostart.bat</code> automatically resumes all approved tunnels!
+          </p>
+          <div className="bg-indigo-950/40 border border-indigo-800/40 rounded-xl p-3 text-[11px] text-indigo-200 space-y-1">
+            <div className="text-indigo-300 font-semibold">⚡ Power Loss Protection:</div>
+            <div className="text-slate-300">- Tunnels stay alive continuously until manually stopped</div>
           </div>
         </div>
-
       </div>
 
-      {/* DNS Provider Guidance Box */}
-      <div className="bg-amber-50/60 border border-amber-200 rounded-2xl p-5 space-y-3">
-        <div className="flex items-center gap-2 text-amber-800">
-          <Info className="w-4 h-4 text-amber-600" />
-          <h4 className="text-xs font-bold uppercase tracking-wider">DNS Setup Suggestion for {domain}</h4>
+      {/* Multi-Port Configuration Table */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h4 className="text-sm font-bold text-slate-900">Target Ports & Custom Domain Mappings</h4>
+            <p className="text-xs text-slate-500">Map each local port to its corresponding public domain or subdomain.</p>
+          </div>
+          <button
+            onClick={addPortRow}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add Another Port
+          </button>
         </div>
-        <p className="text-xs text-slate-600">
-          To point your custom domain (<code className="text-amber-800 font-bold">{fullDomain}</code>) to Turnal, add this <strong>A Record</strong> in your DNS provider (Hostinger, Cloudflare, GoDaddy):
-        </p>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left font-mono text-xs border border-amber-200 rounded-xl overflow-hidden bg-white">
-            <thead className="bg-amber-100/60 text-slate-700 uppercase text-[10px]">
+        <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+          <table className="w-full text-left text-xs text-slate-600">
+            <thead className="bg-slate-50 border-b border-slate-200 font-semibold text-slate-700 uppercase">
               <tr>
-                <th className="p-2.5 border-b border-amber-200">Type</th>
-                <th className="p-2.5 border-b border-amber-200">Name / Host</th>
-                <th className="p-2.5 border-b border-amber-200">Points To (Value)</th>
-                <th className="p-2.5 border-b border-amber-200">Recommended TTL</th>
+                <th className="p-3">#</th>
+                <th className="p-3">Service Name</th>
+                <th className="p-3">Local Port</th>
+                <th className="p-3">Subdomain</th>
+                <th className="p-3">Full Target Domain</th>
+                <th className="p-3">Status</th>
+                <th className="p-3 text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="text-slate-900">
-              <tr>
-                <td className="p-2.5 border-b border-slate-100 font-bold text-amber-600">A</td>
-                <td className="p-2.5 border-b border-slate-100 text-sky-700 font-bold">{sub}</td>
-                <td className="p-2.5 border-b border-slate-100 text-emerald-700 font-bold">13.62.54.247</td>
-                <td className="p-2.5 border-b border-slate-100 text-purple-700">300 (5 mins)</td>
-              </tr>
+            <tbody className="divide-y divide-slate-100">
+              {portMappings.map((row, idx) => {
+                const isOnline = row.status === 'ONLINE';
+                const isPending = row.status === 'PENDING_APPROVAL' || row.status === 'OFFLINE' || !row.status;
+                const isRejected = row.status === 'REJECTED';
+
+                return (
+                  <tr key={row.id} className="hover:bg-slate-50/60 transition">
+                    <td className="p-3 font-mono text-slate-400">{idx + 1}</td>
+                    <td className="p-3">
+                      <input
+                        type="text"
+                        value={row.name}
+                        onChange={(e) => updatePortRow(idx, 'name', e.target.value)}
+                        placeholder="Service Name"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-medium focus:ring-1 focus:ring-sky-500 bg-white"
+                      />
+                    </td>
+                    <td className="p-3">
+                      <input
+                        type="number"
+                        value={row.port}
+                        onChange={(e) => updatePortRow(idx, 'port', e.target.value)}
+                        placeholder="3000"
+                        className="w-24 px-2.5 py-1.5 rounded-lg border border-slate-200 font-mono text-xs font-bold focus:ring-1 focus:ring-sky-500 bg-white"
+                      />
+                    </td>
+                    <td className="p-3">
+                      <input
+                        type="text"
+                        value={row.subdomain}
+                        onChange={(e) => updatePortRow(idx, 'subdomain', e.target.value)}
+                        placeholder="subdomain"
+                        className="w-28 px-2.5 py-1.5 rounded-lg border border-slate-200 font-mono text-xs focus:ring-1 focus:ring-sky-500 bg-white"
+                      />
+                    </td>
+                    <td className="p-3">
+                      <input
+                        type="text"
+                        value={row.customDomain}
+                        onChange={(e) => updatePortRow(idx, 'customDomain', e.target.value)}
+                        placeholder="app.skyranksolution.com"
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-mono text-xs text-sky-700 font-medium focus:ring-1 focus:ring-sky-500 bg-white"
+                      />
+                    </td>
+                    <td className="p-3">
+                      {isOnline && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Online
+                        </span>
+                      )}
+                      {isPending && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-bold">
+                          <Clock className="w-3 h-3 text-amber-600" />
+                          Pending Approval
+                        </span>
+                      )}
+                      {isRejected && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold">
+                          <XCircle className="w-3 h-3 text-rose-600" />
+                          Rejected
+                        </span>
+                      )}
+                    </td>
+                    <td className="p-3 text-right">
+                      <button
+                        onClick={() => removePortRow(idx)}
+                        disabled={portMappings.length <= 1}
+                        className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 disabled:opacity-30 transition"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
-      </div>
 
-      {/* Step 3: Generated CLI Command & One-Click Copy */}
-      <div className="bg-slate-50/80 border border-slate-200 rounded-2xl p-6 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-extrabold px-2.5 py-1 rounded-md bg-purple-100 text-purple-700 border border-purple-200">
-              STEP 3
-            </span>
-            <h4 className="text-sm font-bold text-slate-900">Execute Terminal Command (No Code Install Needed)</h4>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1 bg-slate-200 border border-slate-300 rounded-lg p-1 text-[11px]">
-              <button
-                onClick={() => setUseNpx(true)}
-                className={`px-2.5 py-1 rounded-md font-bold transition-colors ${useNpx ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-              >
-                turnal CLI
-              </button>
-              <button
-                onClick={() => setUseNpx(false)}
-                className={`px-2.5 py-1 rounded-md font-bold transition-colors ${!useNpx ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-              >
-                node cli.mjs
-              </button>
-            </div>
-
-            <a
-              href="/cli.mjs"
-              download="cli.mjs"
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3.5 py-1.5 rounded-xl text-xs transition-colors shadow-sm"
-              title="Download standalone cli.mjs file for your PC/friend"
-            >
-              <Download className="w-3.5 h-3.5" /> Download cli.mjs
-            </a>
-
-            <button
-              onClick={handleCopyCmd}
-              className="flex items-center gap-1.5 bg-sky-600 hover:bg-sky-700 text-white font-bold px-4 py-1.5 rounded-xl text-xs transition-colors shadow-sm"
-            >
-              {copiedCmd ? (
-                <>
-                  <Check className="w-3.5 h-3.5" /> Copied Command!
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" /> Copy Command
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 font-mono text-xs text-sky-300 break-all select-all flex items-center justify-between gap-3 shadow-inner">
-          <span>{generatedCommand}</span>
-        </div>
-      </div>
-
-      {/* Step 4: Access Live Public URL */}
-      <div className="bg-gradient-to-r from-emerald-500/10 via-slate-50 to-white border border-emerald-200 rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-extrabold px-2.5 py-1 rounded-md bg-emerald-100 text-emerald-700 border border-emerald-200">
-              STEP 4
-            </span>
-            <h4 className="text-sm font-bold text-slate-900">Access Your Public Live URL</h4>
-          </div>
-          <p className="text-xs text-slate-500">
-            Once you run the command in your terminal, your local project will be accessible worldwide at:
-          </p>
-          <div className="text-sm font-mono font-bold text-emerald-600 pt-1">{liveUrl}</div>
-        </div>
-
-        <div className="flex items-center gap-2">
+        {/* Action Buttons */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
           <button
-            onClick={handleCopyUrl}
-            className="p-2.5 rounded-xl bg-white border border-slate-200 text-slate-600 hover:text-slate-900 transition-colors shadow-sm"
-            title="Copy Public URL"
+            onClick={handleSubmitAll}
+            disabled={saving}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition shadow-sm"
           >
-            {copiedUrl ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+            <Zap className={`w-4 h-4 ${saving ? 'animate-spin' : ''}`} />
+            {saving ? 'Submitting Requests...' : 'Submit Port Configurations for Approval'}
           </button>
-          <a
-            href={liveUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-xl text-xs transition-colors shadow-sm"
+
+          <button
+            onClick={handleDownloadZip}
+            disabled={downloading}
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-sm"
           >
-            Open Live URL <ExternalLink className="w-3.5 h-3.5" />
-          </a>
+            <Download className={`w-4 h-4 ${downloading ? 'animate-bounce' : ''}`} />
+            {downloading ? 'Generating ZIP...' : 'Download Configured Agent ZIP'}
+          </button>
+        </div>
+      </div>
+
+      {/* DNS Setup Suggestion Box */}
+      <div className="bg-amber-50/60 border border-amber-200/80 rounded-2xl p-5 space-y-3">
+        <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+          <Info className="w-4 h-4 text-amber-600" />
+          DNS SETUP SUGGESTION FOR CUSTOM DOMAINS
+        </div>
+        <p className="text-xs text-amber-800 leading-relaxed">
+          To point your custom domains to Turnal, add this <strong>A Record</strong> in your DNS provider (Hostinger, Cloudflare, GoDaddy):
+        </p>
+        <div className="border border-amber-200 rounded-xl overflow-hidden bg-white/80">
+          <table className="w-full text-left text-xs font-mono">
+            <thead className="bg-amber-100/50 text-[11px] text-amber-900 font-bold border-b border-amber-200">
+              <tr>
+                <th className="p-2.5">TYPE</th>
+                <th className="p-2.5">NAME / HOST</th>
+                <th className="p-2.5">POINTS TO (VALUE)</th>
+                <th className="p-2.5">RECOMMENDED TTL</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-amber-100">
+              <tr>
+                <td className="p-2.5 font-bold text-amber-900">A</td>
+                <td className="p-2.5 text-sky-800 font-bold">@ / app / api / *</td>
+                <td className="p-2.5 font-bold text-purple-700">13.62.54.247</td>
+                <td className="p-2.5 text-slate-600">300 (5 mins)</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

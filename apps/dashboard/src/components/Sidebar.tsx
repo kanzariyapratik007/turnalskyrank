@@ -18,6 +18,7 @@ import {
 const navigation = [
   { name: 'Overview', href: '/', icon: LayoutDashboard },
   { name: 'Tunnels', href: '/tunnels', icon: Radio },
+  { name: 'Admin Approvals', href: '/admin', icon: ShieldCheck },
   { name: 'Projects', href: '/projects', icon: FolderGit2 },
   { name: 'Custom Domains', href: '/domains', icon: Globe },
   { name: 'Analytics & Logs', href: '/analytics', icon: BarChart3 },

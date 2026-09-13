@@ -10,6 +10,7 @@ import { projectRouter } from './modules/project/project.controller.js';
 import { deviceRouter } from './modules/device/device.controller.js';
 import { apiKeyRouter } from './modules/apikey/apikey.controller.js';
 import { analyticsRouter } from './modules/analytics/analytics.controller.js';
+import { adminRouter } from './modules/admin/admin.controller.js';
 
 const app = express();
 
@@ -40,6 +41,7 @@ app.use('/api/projects', projectRouter);
 app.use('/api/devices', deviceRouter);
 app.use('/api/apikeys', apiKeyRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/admin', adminRouter);
 
 // Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

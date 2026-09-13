@@ -92,6 +92,10 @@ export const prisma = {
       dbState = loadDatabase();
       return dbState.users.find(u => (where.id && u.id === where.id) || (where.email && u.email.toLowerCase() === where.email.toLowerCase())) || null;
     },
+    findFirst: async ({ where }: any) => {
+      dbState = loadDatabase();
+      return dbState.users.find(u => (!where?.id || u.id === where.id) && (!where?.email || u.email.toLowerCase() === where.email.toLowerCase())) || null;
+    },
     create: async ({ data }: { data: any }) => {
       dbState = loadDatabase();
       const user = {

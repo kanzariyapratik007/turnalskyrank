@@ -3,7 +3,9 @@ export enum TunnelStatus {
   ONLINE = 'ONLINE',
   CONNECTING = 'CONNECTING',
   ERROR = 'ERROR',
-  DISABLED = 'DISABLED'
+  DISABLED = 'DISABLED',
+  PENDING_APPROVAL = 'PENDING_APPROVAL',
+  REJECTED = 'REJECTED'
 }
 
 export enum DomainVerificationStatus {
@@ -48,6 +50,9 @@ export interface TunnelSummary {
   protocol: 'http' | 'https';
   connectedDeviceId?: string;
   connectedDeviceName?: string;
+  approvedAt?: string;
+  approvedBy?: string;
+  rejectionReason?: string;
   createdAt: string;
   lastHeartbeatAt?: string;
   totalRequests: number;

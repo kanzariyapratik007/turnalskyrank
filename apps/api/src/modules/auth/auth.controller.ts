@@ -136,20 +136,12 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
 
 authRouter.get('/me', authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user!.id },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        createdAt: true,
-        subscriptions: { include: { plan: true } }
-      }
+    const user = await (prisma.user.findUnique as any)({
+      where: { id: req.user!.id }
     });
 
     if (!user) {
-      res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'User record not found' } });
+      res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'User not found' } });
       return;
     }
 

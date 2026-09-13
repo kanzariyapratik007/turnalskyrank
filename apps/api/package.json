@@ -16,6 +16,8 @@
     "@turnal/config": "^1.0.0",
     "@turnal/protocol": "^1.0.0",
     "@turnal/shared": "^1.0.0",
+    "@types/archiver": "^8.0.0",
+    "archiver": "^8.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",

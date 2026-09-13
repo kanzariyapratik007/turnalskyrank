@@ -187,6 +187,12 @@ export class TunnelClient extends EventEmitter {
 
     this.emit('disconnected', { reason });
 
+    if (this.reconnectAttempts >= 30) {
+      console.log('Max reconnect attempts reached (30). Stopping auto-reconnect to prevent memory leak.');
+      this.isStopping = true;
+      return;
+    }
+
     const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 15000);
     this.reconnectAttempts++;
 

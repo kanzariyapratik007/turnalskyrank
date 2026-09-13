@@ -202,4 +202,79 @@ program
     await client.start();
   });
 
+// 5. RUN-CONFIG COMMAND (Multi-Port Tunnel Runner from config.json)
+program
+  .command('run-config')
+  .description('Run all configured tunnels from config.json concurrently')
+  .option('-c, --config <path>', 'Path to config.json', 'config.json')
+  .action(async (options) => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+
+    const configPath = path.resolve(process.cwd(), options.config);
+    if (!fs.existsSync(configPath)) {
+      console.error(chalk.red(`✖ Config file not found at: ${configPath}`));
+      process.exit(1);
+    }
+
+    const fileContent = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const apiKey = fileContent.apiKey;
+    const tunnels = fileContent.tunnels || [];
+    const edgeWsUrl = fileContent.edgeWsUrl || `ws://${config.edge.host === '0.0.0.0' ? '127.0.0.1' : config.edge.host}:${config.edge.port}${config.edge.wsPath}`;
+
+    console.log(chalk.bold.cyan('\n  ████████╗██╗   ██╗██████╗ ███╗   ██╗ █████╗ ██╗     '));
+    console.log(chalk.bold.cyan('  ╚══██╔══╝██║   ██║██╔══██╗████╗  ██║██╔══██╗██║     '));
+    console.log(chalk.bold.cyan('     ██║   ██║   ██║██████╔╝██╔██╗ ██║███████║██║     '));
+    console.log(chalk.bold.cyan('     ██║   ██║   ██║██╔══██╗██║╚██╗██║██╔══██║██║     '));
+    console.log(chalk.bold.cyan('     ██║   ╚██████╔╝██║  ██║██║ ╚████║██║  ██║███████╗'));
+    console.log(chalk.bold.cyan('     ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝\n'));
+
+    console.log(chalk.bold(`🌐 User: ${chalk.cyan(fileContent.user?.name || 'Turnal Developer')} (${fileContent.user?.email || 'N/A'})`));
+    console.log(chalk.bold(`📡 Edge Gateway: ${chalk.gray(edgeWsUrl)}`));
+    console.log(chalk.bold(`⚡ Active Port Configurations: ${chalk.yellow(tunnels.length)}\n`));
+
+    const activeClients: any[] = [];
+
+    for (const t of tunnels) {
+      const port = t.port || t.localTargetPort;
+      const targetDomain = t.domain || t.customDomain || `${t.subdomain}.skyranksolution.com`;
+      const client = new TunnelClient({
+        edgeWsUrl,
+        apiKey,
+        localPort: port,
+        localHost: 'localhost',
+        subdomain: t.subdomain,
+        customDomain: targetDomain,
+        projectName: t.name
+      });
+
+      client.on('connecting', () => {
+        console.log(chalk.yellow(`⏳ [Port ${port}] Connecting for ${targetDomain}...`));
+      });
+
+      client.on('ready', (ack) => {
+        console.log(chalk.green(`✔ [Port ${port}] LIVE: https://${targetDomain} -> http://localhost:${port}`));
+      });
+
+      client.on('error', (err) => {
+        console.log(chalk.red(`✖ [Port ${port}] Error: ${err.message}`));
+      });
+
+      activeClients.push(client);
+      client.start().catch((e) => console.error(e));
+    }
+
+    console.log(chalk.gray('\nPress Ctrl+C to close all tunnels.\n'));
+
+    const shutdown = () => {
+      console.log(chalk.yellow('\nStopping all port tunnels...'));
+      activeClients.forEach(c => c.stop());
+      process.exit(0);
+    };
+
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+  });
+
 program.parse(process.argv);
+
