@@ -172,15 +172,15 @@ echo ========================================================
 echo.
 echo [1/3] Loading configured tunnels from config.json...
 echo [2/3] Connecting to Turnal Edge Server (13.62.54.247:8080)...
-echo [3/3] Checking Admin Approval & SSL status...
+echo [3/3] Checking Admin Approval and SSL status...
 echo.
 
-node cli.mjs run-config
-if %ERRORLEVEL% NEQ 0 (
-    echo.
-    echo [ERROR] Agent stopped with error code %ERRORLEVEL%.
-    pause
-)
+:loop
+node --no-warnings cli.mjs
+echo.
+echo [INFO] Agent disconnected or restarting. Reconnecting in 5 seconds...
+timeout /t 5 /nobreak >nul
+goto loop
 `;
 
       const installAutostartBat = `@echo off
@@ -226,12 +226,14 @@ echo [OK] Auto-Start removed.
 pause
 `;
 
-      const cliMjsContent = `// Turnal Standalone Multi-Port CLI Agent Runner
+      const cliMjsContent = `// Turnal Standalone Multi-Port CLI Agent Runner (Zero npm install required)
 import fs from 'node:fs';
 import path from 'node:path';
-import { WebSocket } from 'ws';
+import http from 'node:http';
 
-console.log('\\x1b[36m%s\\x1b[0m', '🌐 TURNAL MULTI-PORT AGENT RUNNER');
+console.log('\\x1b[36m%s\\x1b[0m', '========================================================');
+console.log('\\x1b[36m%s\\x1b[0m', '      TURNAL MULTI-PORT AGENT (STANDALONE RUNNER)');
+console.log('\\x1b[36m%s\\x1b[0m', '========================================================\\n');
 
 const configPath = path.join(process.cwd(), 'config.json');
 if (!fs.existsSync(configPath)) {
@@ -240,21 +242,76 @@ if (!fs.existsSync(configPath)) {
 }
 
 const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-console.log(\`Loaded \${config.tunnels.length} mapped local ports.\\n\`);
+console.log(\`Loaded \${config.tunnels.length} configured local port mappings:\\n\`);
 
-async function startTunnel(tunnel) {
-  console.log(\`\\x1b[33m⏳ [Port \${tunnel.port}] Requesting tunnel for \${tunnel.domain}...\\x1b[0m\`);
-  
-  if (tunnel.status === 'REJECTED') {
-    console.log(\`\\x1b[31m❌ [Port \${tunnel.port}] Rejected by Admin Policy. (Not Live)\\x1b[0m\`);
+// Use native global WebSocket (Built into Node 21+)
+const WS = typeof WebSocket !== 'undefined' ? WebSocket : globalThis.WebSocket;
+
+if (!WS) {
+  console.error('\\x1b[31m[ERROR] Native WebSocket not available. Please ensure you are running Node.js 21 or higher.\\x1b[0m');
+  process.exit(1);
+}
+
+async function forwardToLocal(reqMsg, localPort) {
+  return new Promise((resolve) => {
+    const options = {
+      hostname: '127.0.0.1',
+      port: localPort,
+      path: reqMsg.path || '/',
+      method: reqMsg.method || 'GET',
+      headers: reqMsg.headers || {}
+    };
+
+    const req = http.request(options, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const bodyBuf = Buffer.concat(chunks);
+        resolve({
+          id: reqMsg.id,
+          type: 'HTTP_RES',
+          status: res.statusCode || 200,
+          headers: res.headers,
+          body: bodyBuf.toString('base64'),
+          isBase64: true
+        });
+      });
+    });
+
+    req.on('error', (err) => {
+      resolve({
+        id: reqMsg.id,
+        type: 'HTTP_RES',
+        status: 502,
+        headers: { 'content-type': 'text/plain' },
+        body: Buffer.from(\`Bad Gateway: Unable to connect to localhost:\${localPort} (\${err.message})\`).toString('base64'),
+        isBase64: true
+      });
+    });
+
+    if (reqMsg.body) {
+      const b = reqMsg.isBase64 ? Buffer.from(reqMsg.body, 'base64') : Buffer.from(reqMsg.body);
+      req.write(b);
+    }
+    req.end();
+  });
+}
+
+function startTunnel(tunnel) {
+  console.log(\`\\x1b[33m⏳ [Port \${tunnel.port}] Connecting tunnel for \${tunnel.domain}...\\x1b[0m\`);
+
+  let ws;
+  try {
+    ws = new WS(config.edgeWsUrl, {
+      headers: { host: tunnel.domain }
+    });
+  } catch (err) {
+    console.error(\`\\x1b[31m[Port \${tunnel.port}] Connection error: \${err.message}\\x1b[0m\`);
+    setTimeout(() => startTunnel(tunnel), 5000);
     return;
   }
 
-  const ws = new WebSocket(config.edgeWsUrl, {
-    headers: { host: tunnel.domain }
-  });
-
-  ws.on('open', () => {
+  ws.addEventListener('open', () => {
     ws.send(JSON.stringify({
       type: 'AUTH_REQ',
       apiKey: config.apiKey,
@@ -273,17 +330,25 @@ async function startTunnel(tunnel) {
     }, 300);
   });
 
-  ws.on('message', (data) => {
+  ws.addEventListener('message', async (event) => {
     try {
-      const msg = JSON.parse(data.toString());
+      const msg = JSON.parse(event.data.toString());
       if (msg.type === 'TUNNEL_REGISTER_ACK') {
-        console.log(\`\\x1b[32m✔ [Port \${tunnel.port}] LIVE: https://\${tunnel.domain} -> http://localhost:\${tunnel.port}\\x1b[0m\`);
+        console.log(\`\\x1b[32m✔ [Port \${tunnel.port}] LIVE & ONLINE: https://\${tunnel.domain} -> http://localhost:\${tunnel.port}\\x1b[0m\`);
+      } else if (msg.type === 'HTTP_REQ') {
+        const responseData = await forwardToLocal(msg, tunnel.port);
+        ws.send(JSON.stringify(responseData));
       }
-    } catch(e) {}
+    } catch (e) {}
   });
 
-  ws.on('close', () => {
+  ws.addEventListener('close', () => {
+    console.log(\`\\x1b[33m[Port \${tunnel.port}] Tunnel disconnected. Retrying in 5 seconds...\\x1b[0m\`);
     setTimeout(() => startTunnel(tunnel), 5000);
+  });
+
+  ws.addEventListener('error', () => {
+    // Retry on close
   });
 }
 
@@ -291,7 +356,7 @@ for (const tunnel of config.tunnels) {
   startTunnel(tunnel);
 }
 
-console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnels in the background. Press Ctrl+C to stop.\\n');
+console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnels in the background. Press Ctrl+C to exit.\\n');
 `;
 
       const readmeContent = `TURNAL MULTI-PORT AGENT INSTRUCTIONS
