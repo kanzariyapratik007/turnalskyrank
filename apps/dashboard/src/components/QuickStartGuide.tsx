@@ -266,7 +266,32 @@ if (!WS) {
   process.exit(1);
 }
 
+async function registerTunnelWithApi(tunnel) {
+  try {
+    const res = await fetch(\`\${config.apiUrl}/api/tunnels\`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': config.apiKey,
+        'Authorization': \`Bearer \${config.apiKey}\`
+      },
+      body: JSON.stringify({
+        name: tunnel.name,
+        subdomain: tunnel.subdomain,
+        customDomain: tunnel.domain,
+        localTargetPort: tunnel.port,
+        localTargetHost: 'localhost',
+        protocol: 'http'
+      })
+    });
+    if (res.ok) {
+      console.log(\`\\x1b[32m✔ [Port \${tunnel.port}] Request registered in Dashboard for Admin Approval.\\x1b[0m\`);
+    }
+  } catch (e) {}
+}
+
 function createTunnelConnection(tunnel) {
+  registerTunnelWithApi(tunnel);
   console.log(\`\\x1b[33m⏳ [Port \${tunnel.port}] Connecting to Turnal Edge for \${tunnel.domain}...\\x1b[0m\`);
 
   let ws;

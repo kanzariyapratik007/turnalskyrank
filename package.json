@@ -14,7 +14,7 @@
     "dev:edge": "npm --workspace=@turnal/edge run dev",
     "dev:dashboard": "npm --workspace=@turnal/dashboard run dev",
     "dev:agent": "npm --workspace=@turnal/tunnel-agent run dev",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present && node scripts/build.mjs",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "node tests/e2e-tunnel.test.mjs",
     "prisma:generate": "npm --workspace=@turnal/api run prisma:generate",
