@@ -11,7 +11,7 @@ export function Navbar() {
   const [user, setUser] = useState<{ name: string; email: string } | null>(null);
 
   useEffect(() => {
-    if (pathname === '/login' || pathname === '/register') return;
+    if (pathname === '/login' || pathname === '/register' || pathname.startsWith('/admin')) return;
 
     fetchApi('/api/auth/me').then((res) => {
       if (res.success && res.data) {
@@ -22,7 +22,7 @@ export function Navbar() {
     });
   }, [pathname, router]);
 
-  if (pathname === '/login' || pathname === '/register') {
+  if (pathname === '/login' || pathname === '/register' || pathname.startsWith('/admin')) {
     return null;
   }
 

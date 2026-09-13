@@ -189,13 +189,22 @@ export default function AdminApprovalsPage() {
               Inspect incoming client tunnel requests across multiple local ports. Grant selective approval, issue instant SSL routing, or reject unwanted port forwards.
             </p>
           </div>
-          <button
-            onClick={loadData}
-            className="self-start sm:self-center inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh Telemetry
-          </button>
+          <div className="flex items-center gap-2 self-start sm:self-center">
+            <button
+              onClick={loadData}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+            <button
+              onClick={handleAdminLogout}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-semibold transition"
+            >
+              <User className="w-3.5 h-3.5" />
+              Sign Out
+            </button>
+          </div>
         </div>
 
         {/* Stats Grid */}

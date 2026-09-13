@@ -29,7 +29,7 @@ const navigation = [
 export function Sidebar() {
   const pathname = usePathname();
 
-  if (pathname === '/login' || pathname === '/register' || pathname.startsWith('/admin/login')) {
+  if (pathname === '/login' || pathname === '/register' || pathname.startsWith('/admin')) {
     return null;
   }
 
