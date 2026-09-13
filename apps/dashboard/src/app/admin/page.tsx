@@ -164,7 +164,7 @@ export default function AdminApprovalsPage() {
   };
 
   const filteredTunnels = tunnels.filter(t => {
-    if (filter === 'PENDING') return t.status === 'PENDING_APPROVAL' || t.status === 'OFFLINE';
+    if (filter === 'PENDING') return t.status === 'PENDING_APPROVAL' || t.status === 'OFFLINE' || t.status === 'CONFIGURED' || !t.status;
     if (filter === 'APPROVED') return t.status === 'ONLINE';
     if (filter === 'REJECTED') return t.status === 'REJECTED';
     return true;
@@ -230,7 +230,7 @@ export default function AdminApprovalsPage() {
           <div className="bg-amber-950/40 border border-amber-800/40 rounded-2xl p-4">
             <div className="text-xs text-amber-400 font-medium">Pending Approvals</div>
             <div className="text-2xl font-bold text-amber-300 mt-1">
-              {tunnels.filter(t => t.status === 'PENDING_APPROVAL' || t.status === 'OFFLINE').length}
+              {tunnels.filter(t => t.status === 'PENDING_APPROVAL' || t.status === 'OFFLINE' || t.status === 'CONFIGURED' || !t.status).length}
             </div>
           </div>
           <div className="bg-rose-950/40 border border-rose-800/40 rounded-2xl p-4">
