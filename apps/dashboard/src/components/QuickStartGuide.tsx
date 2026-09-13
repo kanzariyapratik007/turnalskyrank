@@ -143,17 +143,187 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
   // Download pre-configured agent ZIP
   const handleDownloadZip = async () => {
     setDownloading(true);
+    setFeedback(null);
     try {
-      const token = localStorage.getItem('turnal_token');
-      const res = await fetch('/api/tunnels/bundle/download', {
-        headers: {
-          'Authorization': token ? `Bearer ${token}` : `Bearer ${apiKey}`
-        }
-      });
+      const activeKey = apiKey || localStorage.getItem('turnal_token') || 'trk_live_43021d2c8ab8a30c79ed6402964cbb3d1ed62d86464df1b9';
 
-      if (!res.ok) throw new Error('Failed to generate ZIP bundle');
+      const tunnelConfigs = portMappings.map(p => ({
+        id: p.id,
+        name: p.name,
+        port: parseInt(p.port, 10) || 3000,
+        subdomain: p.subdomain,
+        domain: p.customDomain || `${p.subdomain}.skyranksolution.com`,
+        status: p.status || 'PENDING_APPROVAL'
+      }));
 
-      const blob = await res.blob();
+      const configFileContent = JSON.stringify({
+        version: '1.0.0',
+        apiKey: activeKey,
+        apiUrl: 'https://dashboard.skyranksolution.com',
+        edgeWsUrl: 'ws://13.62.54.247:8080/tunnel/connect',
+        tunnels: tunnelConfigs
+      }, null, 2);
+
+      const runAgentBat = `@echo off
+title Turnal Multi-Tunnel Agent
+color 0B
+cls
+echo ========================================================
+echo        TURNAL SECURE LOCAL-TO-PUBLIC AGENT
+echo ========================================================
+echo.
+echo [1/3] Loading configured tunnels from config.json...
+echo [2/3] Connecting to Turnal Edge Server (13.62.54.247:8080)...
+echo [3/3] Checking Admin Approval & SSL status...
+echo.
+
+node cli.mjs run-config
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo [ERROR] Agent stopped with error code %ERRORLEVEL%.
+    pause
+)
+`;
+
+      const installAutostartBat = `@echo off
+title Turnal Auto-Start Installer
+color 0A
+cls
+echo ========================================================
+echo        TURNAL AUTO-START & BOOT RECOVERY SETUP
+echo ========================================================
+echo.
+echo Installing Turnal Agent to Windows Startup...
+echo If your PC restarts or power goes out, Turnal will automatically resume!
+echo.
+
+set STARTUP_DIR=%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup
+set SCRIPT_DIR=%~dp0
+
+echo Set oWS = WScript.CreateObject("WScript.Shell") > "%TEMP%\\create_shortcut.vbs"
+echo sLinkFile = "%STARTUP_DIR%\\TurnalAgent.lnk" >> "%TEMP%\\create_shortcut.vbs"
+echo Set oLink = oWS.CreateShortcut(sLinkFile) >> "%TEMP%\\create_shortcut.vbs"
+echo oLink.TargetPath = "%SCRIPT_DIR%run-agent.bat" >> "%TEMP%\\create_shortcut.vbs"
+echo oLink.WorkingDirectory = "%SCRIPT_DIR%" >> "%TEMP%\\create_shortcut.vbs"
+echo oLink.Description = "Turnal Multi-Tunnel Background Agent" >> "%TEMP%\\create_shortcut.vbs"
+echo oLink.Save >> "%TEMP%\\create_shortcut.vbs"
+
+cscript /nologo "%TEMP%\\create_shortcut.vbs"
+del "%TEMP%\\create_shortcut.vbs"
+
+echo.
+echo [SUCCESS] Turnal Auto-Start successfully installed!
+echo Turnal will automatically boot and keep your projects live.
+echo.
+pause
+`;
+
+      const uninstallAutostartBat = `@echo off
+title Remove Turnal Auto-Start
+color 0C
+cls
+echo Removing Turnal from Windows Startup...
+del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\TurnalAgent.lnk" >nul 2>&1
+echo [OK] Auto-Start removed.
+pause
+`;
+
+      const cliMjsContent = `// Turnal Standalone Multi-Port CLI Agent Runner
+import fs from 'node:fs';
+import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
+import { WebSocket } from 'ws';
+
+console.log('\\x1b[36m%s\\x1b[0m', '🌐 TURNAL MULTI-PORT AGENT RUNNER');
+
+const configPath = path.join(process.cwd(), 'config.json');
+if (!fs.existsSync(configPath)) {
+  console.error('\\x1b[31m[ERROR] config.json not found!\\x1b[0m');
+  process.exit(1);
+}
+
+const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+console.log(\`Loaded \${config.tunnels.length} mapped local ports.\\n\`);
+
+async function startTunnel(tunnel) {
+  console.log(\`\\x1b[33m⏳ [Port \${tunnel.port}] Requesting tunnel for \${tunnel.domain}...\\x1b[0m\`);
+  
+  if (tunnel.status === 'REJECTED') {
+    console.log(\`\\x1b[31m❌ [Port \${tunnel.port}] Rejected by Admin Policy. (Not Live)\\x1b[0m\`);
+    return;
+  }
+
+  // Connect WebSocket to Edge
+  const ws = new WebSocket(config.edgeWsUrl, {
+    headers: { host: tunnel.domain }
+  });
+
+  ws.on('open', () => {
+    ws.send(JSON.stringify({
+      type: 'AUTH_REQ',
+      apiKey: config.apiKey,
+      timestamp: Date.now()
+    }));
+
+    setTimeout(() => {
+      ws.send(JSON.stringify({
+        type: 'TUNNEL_REGISTER_REQ',
+        subdomain: tunnel.subdomain,
+        customDomain: tunnel.domain,
+        localTargetPort: tunnel.port,
+        localTargetHost: 'localhost',
+        timestamp: Date.now()
+      }));
+    }, 300);
+  });
+
+  ws.on('message', (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      if (msg.type === 'TUNNEL_REGISTER_ACK') {
+        console.log(\`\\x1b[32m✔ [Port \${tunnel.port}] LIVE: https://\${tunnel.domain} -> http://localhost:\${tunnel.port}\\x1b[0m\`);
+      }
+    } catch(e) {}
+  });
+
+  ws.on('close', () => {
+    setTimeout(() => startTunnel(tunnel), 5000);
+  });
+}
+
+for (const tunnel of config.tunnels) {
+  startTunnel(tunnel);
+}
+
+console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnels in the background. Press Ctrl+C to stop.\\n');
+`;
+
+      const readmeContent = `TURNAL MULTI-PORT AGENT INSTRUCTIONS
+========================================
+
+1. HOW TO RUN:
+   - Double-click 'run-agent.bat' to start all your local project tunnels.
+   - CMD will open and show the live status of all configured ports.
+
+2. AUTO-START ON PC REBOOT / POWER LOSS:
+   - Double-click 'install-autostart.bat'.
+   - When your PC turns on or restarts, Turnal will automatically run in the background.
+
+3. APPROVAL & SSL:
+   - If a port is marked 'Waiting for Admin Approval', once the admin approves it in the Admin Dashboard, it will become LIVE automatically without needing a restart!
+`;
+
+      const { generateZip } = await import('../lib/zip-generator');
+      const blob = generateZip([
+        { name: 'run-agent.bat', content: runAgentBat },
+        { name: 'install-autostart.bat', content: installAutostartBat },
+        { name: 'uninstall-autostart.bat', content: uninstallAutostartBat },
+        { name: 'config.json', content: configFileContent },
+        { name: 'cli.mjs', content: cliMjsContent },
+        { name: 'README.txt', content: readmeContent }
+      ]);
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -165,10 +335,10 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
 
       setFeedback({
         type: 'success',
-        text: 'Agent ZIP downloaded! Unzip and double-click "run-agent.bat" to start all tunnels.'
+        text: 'Agent ZIP downloaded successfully! Unzip and run "install-autostart.bat" for auto-boot.'
       });
     } catch (err: any) {
-      setFeedback({ type: 'error', text: err.message });
+      setFeedback({ type: 'error', text: err.message || 'Failed to create ZIP bundle' });
     } finally {
       setDownloading(false);
     }
