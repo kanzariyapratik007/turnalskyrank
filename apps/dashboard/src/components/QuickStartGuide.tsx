@@ -226,7 +226,7 @@ echo [OK] Auto-Start removed.
 pause
 `;
 
-      const cliMjsContent = `// Turnal Standalone Multi-Port CLI Agent Runner (Zero npm install required)
+      const cliMjsContent = `// Turnal Standalone Multi-Port CLI Agent Runner (Zero dependencies required)
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -244,119 +244,165 @@ if (!fs.existsSync(configPath)) {
 const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 console.log(\`Loaded \${config.tunnels.length} configured local port mappings:\\n\`);
 
-// Use native global WebSocket (Built into Node 21+)
 const WS = typeof WebSocket !== 'undefined' ? WebSocket : globalThis.WebSocket;
-
 if (!WS) {
   console.error('\\x1b[31m[ERROR] Native WebSocket not available. Please ensure you are running Node.js 21 or higher.\\x1b[0m');
   process.exit(1);
 }
 
-async function forwardToLocal(reqMsg, localPort) {
-  return new Promise((resolve) => {
-    const options = {
-      hostname: '127.0.0.1',
-      port: localPort,
-      path: reqMsg.path || '/',
-      method: reqMsg.method || 'GET',
-      headers: reqMsg.headers || {}
-    };
-
-    const req = http.request(options, (res) => {
-      const chunks = [];
-      res.on('data', (c) => chunks.push(c));
-      res.on('end', () => {
-        const bodyBuf = Buffer.concat(chunks);
-        resolve({
-          id: reqMsg.id,
-          type: 'HTTP_RES',
-          status: res.statusCode || 200,
-          headers: res.headers,
-          body: bodyBuf.toString('base64'),
-          isBase64: true
-        });
-      });
-    });
-
-    req.on('error', (err) => {
-      resolve({
-        id: reqMsg.id,
-        type: 'HTTP_RES',
-        status: 502,
-        headers: { 'content-type': 'text/plain' },
-        body: Buffer.from(\`Bad Gateway: Unable to connect to localhost:\${localPort} (\${err.message})\`).toString('base64'),
-        isBase64: true
-      });
-    });
-
-    if (reqMsg.body) {
-      const b = reqMsg.isBase64 ? Buffer.from(reqMsg.body, 'base64') : Buffer.from(reqMsg.body);
-      req.write(b);
-    }
-    req.end();
-  });
-}
-
-function startTunnel(tunnel) {
+function createTunnelConnection(tunnel) {
   console.log(\`\\x1b[33m⏳ [Port \${tunnel.port}] Connecting tunnel for \${tunnel.domain}...\\x1b[0m\`);
 
   let ws;
+  const activeRequests = new Map();
+
   try {
     ws = new WS(config.edgeWsUrl, {
       headers: { host: tunnel.domain }
     });
   } catch (err) {
     console.error(\`\\x1b[31m[Port \${tunnel.port}] Connection error: \${err.message}\\x1b[0m\`);
-    setTimeout(() => startTunnel(tunnel), 5000);
+    setTimeout(() => createTunnelConnection(tunnel), 5000);
     return;
   }
 
+  const send = (msg) => {
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify(msg));
+    }
+  };
+
   ws.addEventListener('open', () => {
-    ws.send(JSON.stringify({
+    // 1. Send AUTH_REQ
+    send({
       type: 'AUTH_REQ',
       apiKey: config.apiKey,
+      agentVersion: '1.0.0',
+      platform: process.platform,
+      deviceName: process.env.COMPUTERNAME || process.env.HOSTNAME || 'agent-device',
       timestamp: Date.now()
-    }));
-
-    setTimeout(() => {
-      ws.send(JSON.stringify({
-        type: 'TUNNEL_REGISTER_REQ',
-        subdomain: tunnel.subdomain,
-        customDomain: tunnel.domain,
-        localTargetPort: tunnel.port,
-        localTargetHost: 'localhost',
-        timestamp: Date.now()
-      }));
-    }, 300);
+    });
   });
 
-  ws.addEventListener('message', async (event) => {
+  ws.addEventListener('message', (event) => {
     try {
       const msg = JSON.parse(event.data.toString());
-      if (msg.type === 'TUNNEL_REGISTER_ACK') {
+
+      if (msg.type === 'AUTH_ACK') {
+        // 2. Authenticated -> Send TUNNEL_REGISTER_REQ
+        send({
+          type: 'TUNNEL_REGISTER_REQ',
+          projectName: tunnel.name,
+          subdomain: tunnel.subdomain,
+          customDomain: tunnel.domain,
+          localTargetPort: tunnel.port,
+          localTargetHost: 'localhost',
+          protocol: 'http',
+          timestamp: Date.now()
+        });
+      } else if (msg.type === 'TUNNEL_REGISTER_ACK') {
         console.log(\`\\x1b[32m✔ [Port \${tunnel.port}] LIVE & ONLINE: https://\${tunnel.domain} -> http://localhost:\${tunnel.port}\\x1b[0m\`);
-      } else if (msg.type === 'HTTP_REQ') {
-        const responseData = await forwardToLocal(msg, tunnel.port);
-        ws.send(JSON.stringify(responseData));
+      } else if (msg.type === 'TUNNEL_REGISTER_FAIL') {
+        console.log(\`\\x1b[31m❌ [Port \${tunnel.port}] Registration issue: \${msg.reason || 'Pending Admin Approval'}\\x1b[0m\`);
+      } else if (msg.type === 'HEARTBEAT_PING') {
+        // Reply to keep-alive heartbeat
+        send({
+          type: 'HEARTBEAT_PONG',
+          sequence: msg.sequence,
+          timestamp: Date.now()
+        });
+      } else if (msg.type === 'HTTP_REQUEST_START') {
+        const startTime = Date.now();
+        const reqOptions = {
+          hostname: '127.0.0.1',
+          port: tunnel.port,
+          path: msg.path || '/',
+          method: msg.method || 'GET',
+          headers: {
+            ...(msg.headers || {}),
+            host: \`localhost:\${tunnel.port}\`
+          }
+        };
+
+        const localReq = http.request(reqOptions, (localRes) => {
+          let bytesSent = 0;
+
+          send({
+            type: 'HTTP_RESPONSE_START',
+            requestId: msg.requestId,
+            statusCode: localRes.statusCode || 200,
+            statusMessage: localRes.statusMessage,
+            headers: localRes.headers,
+            timestamp: Date.now()
+          });
+
+          localRes.on('data', (chunk) => {
+            bytesSent += chunk.length;
+            send({
+              type: 'HTTP_RESPONSE_CHUNK',
+              requestId: msg.requestId,
+              chunk: chunk.toString('base64'),
+              isBinary: true,
+              timestamp: Date.now()
+            });
+          });
+
+          localRes.on('end', () => {
+            activeRequests.delete(msg.requestId);
+            send({
+              type: 'HTTP_RESPONSE_END',
+              requestId: msg.requestId,
+              durationMs: Date.now() - startTime,
+              bytesSent,
+              timestamp: Date.now()
+            });
+          });
+        });
+
+        localReq.on('error', (err) => {
+          activeRequests.delete(msg.requestId);
+          send({
+            type: 'ERROR',
+            requestId: msg.requestId,
+            code: 'LOCAL_CONNECTION_REFUSED',
+            message: \`Failed to connect to local application at http://localhost:\${tunnel.port} (\${err.message})\`,
+            timestamp: Date.now()
+          });
+        });
+
+        activeRequests.set(msg.requestId, localReq);
+      } else if (msg.type === 'HTTP_REQUEST_CHUNK') {
+        const req = activeRequests.get(msg.requestId);
+        if (req && !req.destroyed) {
+          const buf = Buffer.from(msg.chunk, 'base64');
+          req.write(buf);
+        }
+      } else if (msg.type === 'HTTP_REQUEST_END') {
+        const req = activeRequests.get(msg.requestId);
+        if (req && !req.destroyed) {
+          req.end();
+        }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('[Error processing wire frame]:', e.message);
+    }
   });
 
   ws.addEventListener('close', () => {
-    console.log(\`\\x1b[33m[Port \${tunnel.port}] Tunnel disconnected. Retrying in 5 seconds...\\x1b[0m\`);
-    setTimeout(() => startTunnel(tunnel), 5000);
+    console.log(\`\\x1b[33m[Port \${tunnel.port}] Disconnected from server. Reconnecting in 5 seconds...\\x1b[0m\`);
+    setTimeout(() => createTunnelConnection(tunnel), 5000);
   });
 
   ws.addEventListener('error', () => {
-    // Retry on close
+    // ws close will trigger reconnect
   });
 }
 
 for (const tunnel of config.tunnels) {
-  startTunnel(tunnel);
+  createTunnelConnection(tunnel);
 }
 
-console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnels in the background. Press Ctrl+C to exit.\\n');
+console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is maintaining persistent connections in background. Press Ctrl+C to stop.\\n');
 `;
 
       const readmeContent = `TURNAL MULTI-PORT AGENT INSTRUCTIONS
