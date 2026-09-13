@@ -34,7 +34,10 @@ interface PendingTunnel {
   rejectionReason?: string;
 }
 
+import { useRouter } from 'next/navigation';
+
 export default function AdminApprovalsPage() {
+  const router = useRouter();
   const [tunnels, setTunnels] = useState<PendingTunnel[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -43,13 +46,30 @@ export default function AdminApprovalsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const handleAdminLogout = () => {
+    localStorage.removeItem('turnal_admin_token');
+    localStorage.removeItem('turnal_admin_user');
+    router.push('/admin/login');
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
+      const adminToken = localStorage.getItem('turnal_admin_token') || localStorage.getItem('turnal_token');
+      if (!adminToken) {
+        router.push('/admin/login');
+        return;
+      }
+
       const [tunnelsRes, statsRes] = await Promise.all([
         fetchApi('/api/admin/tunnels/pending'),
         fetchApi('/api/admin/stats')
       ]);
+
+      if (tunnelsRes.error?.code === 'FORBIDDEN' || tunnelsRes.error?.code === 'UNAUTHORIZED') {
+        router.push('/admin/login');
+        return;
+      }
 
       if (tunnelsRes.success && tunnelsRes.data) {
         setTunnels(tunnelsRes.data);

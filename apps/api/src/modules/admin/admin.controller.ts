@@ -1,12 +1,15 @@
 import { Router, Response } from 'express';
 import { prisma } from '../../db.js';
-import { authMiddleware, AuthenticatedRequest } from '../../middleware/auth.middleware.js';
+import { authMiddleware, adminOnlyMiddleware, AuthenticatedRequest } from '../../middleware/auth.middleware.js';
 import { TunnelStatus, DomainVerificationStatus, SslStatus } from '@turnal/shared';
 
 export const adminRouter = Router();
 
+// Apply Auth and Admin Role protection to all admin endpoints
+adminRouter.use(authMiddleware, adminOnlyMiddleware);
+
 // GET /api/admin/tunnels/pending - Fetch all tunnels pending admin approval
-adminRouter.get('/tunnels/pending', authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+adminRouter.get('/tunnels/pending', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const allTunnels = await prisma.tunnel.findMany({
       include: {

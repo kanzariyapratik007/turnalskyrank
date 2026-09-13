@@ -110,3 +110,20 @@ export async function authMiddleware(
     next(error);
   }
 }
+
+export function adminOnlyMiddleware(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  const role = (req.user?.role || '').toUpperCase();
+  if (role !== 'ADMIN') {
+    res.status(403).json({
+      success: false,
+      error: { code: 'FORBIDDEN', message: 'Access denied: Administrator privileges required' }
+    });
+    return;
+  }
+  next();
+}
+

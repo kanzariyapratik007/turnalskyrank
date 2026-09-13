@@ -134,6 +134,61 @@ authRouter.post('/login', async (req: Request, res: Response): Promise<void> => 
   }
 });
 
+// Admin Dedicated Secret Login
+authRouter.post('/admin-login', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { username, password } = req.body;
+
+    // Master Admin Key Support or Admin Email Check
+    const isMasterAdmin = (username === 'admin' || username === 'admin@turnal.live' || username === 'pratik') && (password === 'admin@123' || password === 'SkyRank@Admin2026!');
+
+    let adminUser = null;
+
+    if (isMasterAdmin) {
+      adminUser = {
+        id: 'usr_admin_master',
+        email: 'admin@turnal.live',
+        name: 'Master Administrator',
+        role: 'ADMIN'
+      };
+    } else {
+      const user = await prisma.user.findUnique({
+        where: { email: (username || '').toLowerCase().trim() }
+      });
+      if (user && (user.role === 'ADMIN' || user.role === 'admin')) {
+        const isValid = await PasswordService.compare(password, user.passwordHash);
+        if (isValid) {
+          adminUser = { id: user.id, email: user.email, name: user.name, role: 'ADMIN' };
+        }
+      }
+    }
+
+    if (!adminUser) {
+      res.status(401).json({
+        success: false,
+        error: { code: 'INVALID_ADMIN_CREDENTIALS', message: 'Access Denied: Invalid Administrator Credentials' }
+      });
+      return;
+    }
+
+    const token = JwtService.signAccessToken(
+      { userId: adminUser.id, email: adminUser.email, role: 'ADMIN' },
+      config.api.jwtSecret,
+      '24h'
+    );
+
+    res.json({
+      success: true,
+      data: {
+        token,
+        user: adminUser
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: error.message } });
+  }
+});
+
 authRouter.get('/me', authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = await (prisma.user.findUnique as any)({
