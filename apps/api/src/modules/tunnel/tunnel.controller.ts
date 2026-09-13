@@ -38,10 +38,10 @@ tunnelRouter.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Res
       protocol: t.protocol,
       connectedDeviceId: t.connectedDeviceId,
       connectedDeviceName: t.connectedDevice?.name,
-      createdAt: t.createdAt.toISOString(),
-      lastHeartbeatAt: t.lastHeartbeatAt?.toISOString(),
-      totalRequests: t.totalRequests,
-      totalBytes: Number(t.totalBytes),
+      createdAt: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString(),
+      lastHeartbeatAt: t.lastHeartbeatAt ? new Date(t.lastHeartbeatAt).toISOString() : undefined,
+      totalRequests: t.totalRequests || 0,
+      totalBytes: Number(t.totalBytes || 0),
       approvedAt: (t as any).approvedAt,
       rejectionReason: (t as any).rejectionReason
     }));
