@@ -35,8 +35,7 @@ adminRouter.get('/tunnels/pending', async (req: AuthenticatedRequest, res: Respo
         status: t.status,
         userId: t.userId,
         userName: user?.name || 'User',
-        userEmail: user?.email || 'N/A',
-        createdAt: t.createdAt,
+        createdAt: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString(),
         approvedAt: (t as any).approvedAt,
         approvedBy: (t as any).approvedBy,
         rejectionReason: (t as any).rejectionReason

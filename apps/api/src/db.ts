@@ -1,7 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const DB_FILE = path.join(process.cwd(), 'dev.db.json');
+function getDbFilePath(): string {
+  const cwdPath = path.join(process.cwd(), 'dev.db.json');
+  if (fs.existsSync(cwdPath)) return cwdPath;
+  const parentPath = path.join(process.cwd(), '..', '..', 'dev.db.json');
+  if (fs.existsSync(parentPath)) return parentPath;
+  return cwdPath;
+}
+
+const DB_FILE = getDbFilePath();
 
 export interface DatabaseState {
   users: any[];
@@ -16,9 +24,10 @@ export interface DatabaseState {
 }
 
 function loadDatabase(): DatabaseState {
-  if (fs.existsSync(DB_FILE)) {
+  const filePath = getDbFilePath();
+  if (fs.existsSync(filePath)) {
     try {
-      const content = fs.readFileSync(DB_FILE, 'utf-8');
+      const content = fs.readFileSync(filePath, 'utf-8');
       return JSON.parse(content);
     } catch {
       // Fallback
@@ -78,7 +87,8 @@ function loadDatabase(): DatabaseState {
 
 function saveDatabase(state: DatabaseState): void {
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2), 'utf-8');
+    const filePath = getDbFilePath();
+    fs.writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf-8');
   } catch (err) {
     console.error('Failed to persist database file:', err);
   }
