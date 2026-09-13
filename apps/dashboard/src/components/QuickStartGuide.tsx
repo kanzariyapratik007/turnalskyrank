@@ -267,16 +267,14 @@ if (!WS) {
 }
 
 function createTunnelConnection(tunnel) {
-  console.log(\`\\x1b[33m⏳ [Port \${tunnel.port}] Requesting tunnel for \${tunnel.domain} -> localhost:\${tunnel.port}...\\x1b[0m\`);
+  console.log(\`\\x1b[33m⏳ [Port \${tunnel.port}] Connecting to Turnal Edge for \${tunnel.domain}...\\x1b[0m\`);
 
   let ws;
   let isApproved = false;
   const activeRequests = new Map();
 
   try {
-    ws = new WS(config.edgeWsUrl, {
-      headers: { host: tunnel.domain }
-    });
+    ws = new WS(config.edgeWsUrl);
   } catch (err) {
     console.error(\`\\x1b[31m[Port \${tunnel.port}] Connection error: \${err.message}\\x1b[0m\`);
     setTimeout(() => createTunnelConnection(tunnel), 5000);
@@ -307,7 +305,7 @@ function createTunnelConnection(tunnel) {
 
       if (msg.type === 'AUTH_ACK') {
         // 2. Authenticated -> Send TUNNEL_REGISTER_REQ
-        console.log(\`\\x1b[36m[Port \${tunnel.port}] Authenticated with Turnal Edge. Registering tunnel...\\x1b[0m\`);
+        console.log(\`\\x1b[36m[Port \${tunnel.port}] Connected to Turnal Edge. Requesting live tunnel...\\x1b[0m\`);
         send({
           type: 'TUNNEL_REGISTER_REQ',
           projectName: tunnel.name,
@@ -328,7 +326,7 @@ function createTunnelConnection(tunnel) {
         console.log(\`\\x1b[90m👉 Admin Portal: https://dashboard.skyranksolution.com/admin\\x1b[0m\`);
         // Poll for approval every 5 seconds
         setTimeout(() => {
-          if (!isApproved) {
+          if (!isApproved && ws && ws.readyState === 1) {
             send({
               type: 'TUNNEL_REGISTER_REQ',
               projectName: tunnel.name,
@@ -342,7 +340,6 @@ function createTunnelConnection(tunnel) {
           }
         }, 5000);
       } else if (msg.type === 'HEARTBEAT_PING') {
-        // Reply to keep-alive heartbeat
         send({
           type: 'HEARTBEAT_PONG',
           sequence: msg.sequence,
@@ -430,7 +427,7 @@ function createTunnelConnection(tunnel) {
     setTimeout(() => createTunnelConnection(tunnel), 5000);
   });
 
-  ws.addEventListener('error', () => {
+  ws.addEventListener('error', (err) => {
     // handled by close listener
   });
 }
@@ -438,6 +435,10 @@ function createTunnelConnection(tunnel) {
 for (const tunnel of config.tunnels) {
   createTunnelConnection(tunnel);
 }
+
+// Keep event loop alive
+setInterval(() => {}, 60000);
+process.stdin.resume();
 
 console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is maintaining persistent connections in background. Press Ctrl+C to stop.\\n');
 `;
