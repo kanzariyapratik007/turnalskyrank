@@ -124,5 +124,5 @@ export function generateZip(files: ZipFileEntry[]): Blob {
 
   chunks.push(eocd);
 
-  return new Blob(chunks, { type: 'application/zip' });
+  return new Blob(chunks as any, { type: 'application/zip' });
 }

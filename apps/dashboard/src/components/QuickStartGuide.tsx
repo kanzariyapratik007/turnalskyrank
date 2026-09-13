@@ -38,21 +38,18 @@ interface QuickStartGuideProps {
   defaultPort?: string;
 }
 
-export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964cbb3d1ed62d86464df1b9', defaultPort = '3001' }: QuickStartGuideProps) {
+export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964cbb3d1ed62d86464df1b9', defaultPort = '3000' }: QuickStartGuideProps) {
+  // Clean single example row initially; user can dynamically add as many as they want
   const [portMappings, setPortMappings] = useState<PortMapping[]>([
-    { id: '1', name: 'App Frontend', port: '3001', subdomain: 'app', customDomain: 'app.skyranksolution.com', status: 'PENDING_APPROVAL' },
-    { id: '2', name: 'API Server', port: '3002', subdomain: 'api', customDomain: 'api.skyranksolution.com', status: 'PENDING_APPROVAL' },
-    { id: '3', name: 'Admin Portal', port: '5000', subdomain: 'admin', customDomain: 'admin.skyranksolution.com', status: 'PENDING_APPROVAL' },
-    { id: '4', name: 'Testing Microservice', port: '8000', subdomain: 'test', customDomain: 'test.skyranksolution.com', status: 'PENDING_APPROVAL' },
-    { id: '5', name: 'Dev Backend', port: '8080', subdomain: 'dev', customDomain: 'dev.skyranksolution.com', status: 'PENDING_APPROVAL' },
+    { id: '1', name: 'My Web App', port: defaultPort || '3000', subdomain: 'app', customDomain: 'app.skyranksolution.com', status: 'PENDING_APPROVAL' },
   ]);
 
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Load existing user tunnels from API
+  // Load existing user tunnels from API if any exist
   const refreshTunnels = async () => {
     try {
       const res = await fetchApi('/api/tunnels');
@@ -75,7 +72,8 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
   }, []);
 
   const addPortRow = () => {
-    const nextPort = String(3000 + portMappings.length + 1);
+    const nextPortNum = 3000 + portMappings.length;
+    const nextPort = String(nextPortNum);
     setPortMappings([
       ...portMappings,
       {
@@ -97,8 +95,8 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
   const updatePortRow = (index: number, field: keyof PortMapping, value: string) => {
     const updated = [...portMappings];
     updated[index] = { ...updated[index], [field]: value };
-    if (field === 'subdomain' && !updated[index].customDomain.includes('.')) {
-      updated[index].customDomain = `${value}.skyranksolution.com`;
+    if (field === 'subdomain' && (!updated[index].customDomain || updated[index].customDomain.endsWith('.skyranksolution.com'))) {
+      updated[index].customDomain = `${value.trim()}.skyranksolution.com`;
     }
     setPortMappings(updated);
   };
@@ -124,7 +122,7 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
       if (res.success) {
         setFeedback({
           type: 'success',
-          text: `Successfully submitted ${items.length} port tunnel requests! Pending Admin approval.`
+          text: `Successfully submitted ${items.length} port tunnel requests for Admin approval!`
         });
         refreshTunnels();
       } else {
@@ -140,7 +138,7 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
     }
   };
 
-  // Download pre-configured agent ZIP
+  // Download pre-configured agent ZIP generated dynamically from current rows
   const handleDownloadZip = async () => {
     setDownloading(true);
     setFeedback(null);
@@ -231,8 +229,6 @@ pause
       const cliMjsContent = `// Turnal Standalone Multi-Port CLI Agent Runner
 import fs from 'node:fs';
 import path from 'node:path';
-import http from 'node:http';
-import https from 'node:https';
 import { WebSocket } from 'ws';
 
 console.log('\\x1b[36m%s\\x1b[0m', '🌐 TURNAL MULTI-PORT AGENT RUNNER');
@@ -254,7 +250,6 @@ async function startTunnel(tunnel) {
     return;
   }
 
-  // Connect WebSocket to Edge
   const ws = new WebSocket(config.edgeWsUrl, {
     headers: { host: tunnel.domain }
   });
@@ -335,13 +330,19 @@ console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnel
 
       setFeedback({
         type: 'success',
-        text: 'Agent ZIP downloaded successfully! Unzip and run "install-autostart.bat" for auto-boot.'
+        text: `Agent ZIP generated with ${portMappings.length} ports! Unzip & run install-autostart.bat.`
       });
     } catch (err: any) {
       setFeedback({ type: 'error', text: err.message || 'Failed to create ZIP bundle' });
     } finally {
       setDownloading(false);
     }
+  };
+
+  const handleCopyText = (text: string, key: string) => {
+    copyToClipboard(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
   };
 
   return (
@@ -356,7 +357,7 @@ console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnel
             <h3 className="text-xl font-bold text-slate-900">Multi-Port Tunnel & Domain Setup</h3>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Configure multiple local ports (e.g. 5 projects) with individual domains, download your ready-to-run agent ZIP, and recover automatically on system reboot.
+            Add any number of local ports (e.g. 3001, 3002, 5000), configure custom domains, download your auto-starting agent ZIP, and see your exact DNS settings.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -409,11 +410,11 @@ console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnel
           </div>
           <h4 className="text-sm font-bold text-slate-900">Run Local Applications</h4>
           <p className="text-xs text-slate-500">
-            Keep your local projects running on your PC (e.g. Next.js, Django, FastAPI, Express on ports <code className="text-sky-700 font-bold">3001, 3002, 5000</code>).
+            Keep your local projects running on your PC (e.g. Next.js, Django, FastAPI, Express on your configured ports).
           </p>
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 font-mono text-[11px] text-slate-200 space-y-1">
-            <div className="text-emerald-400 font-semibold">✔ Local Network Detected:</div>
-            <div className="text-slate-300">- Ports Configured: <span className="text-sky-300 font-bold">{portMappings.map(p => p.port).join(', ')}</span></div>
+            <div className="text-emerald-400 font-semibold">✔ Local Ports Configured ({portMappings.length}):</div>
+            <div className="text-slate-300">- Ports: <span className="text-sky-300 font-bold">{portMappings.map(p => p.port).join(', ')}</span></div>
             <div className="text-slate-400">- Target Host: http://localhost</div>
           </div>
         </div>
@@ -442,13 +443,13 @@ console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnel
         <div className="flex items-center justify-between">
           <div>
             <h4 className="text-sm font-bold text-slate-900">Target Ports & Custom Domain Mappings</h4>
-            <p className="text-xs text-slate-500">Map each local port to its corresponding public domain or subdomain.</p>
+            <p className="text-xs text-slate-500">Add, edit, or remove your local ports. Map each port to a public domain.</p>
           </div>
           <button
             onClick={addPortRow}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition shadow-sm"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-4 h-4" />
             Add Another Port
           </button>
         </div>
@@ -480,7 +481,7 @@ console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnel
                         type="text"
                         value={row.name}
                         onChange={(e) => updatePortRow(idx, 'name', e.target.value)}
-                        placeholder="Service Name"
+                        placeholder="e.g. My Next.js Frontend"
                         className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-medium focus:ring-1 focus:ring-sky-500 bg-white"
                       />
                     </td>
@@ -498,7 +499,7 @@ console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnel
                         type="text"
                         value={row.subdomain}
                         onChange={(e) => updatePortRow(idx, 'subdomain', e.target.value)}
-                        placeholder="subdomain"
+                        placeholder="app"
                         className="w-28 px-2.5 py-1.5 rounded-lg border border-slate-200 font-mono text-xs focus:ring-1 focus:ring-sky-500 bg-white"
                       />
                     </td>
@@ -507,7 +508,7 @@ console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnel
                         type="text"
                         value={row.customDomain}
                         onChange={(e) => updatePortRow(idx, 'customDomain', e.target.value)}
-                        placeholder="app.skyranksolution.com"
+                        placeholder="app.skyranksolution.com or mydomain.com"
                         className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 font-mono text-xs text-sky-700 font-medium focus:ring-1 focus:ring-sky-500 bg-white"
                       />
                     </td>
@@ -536,6 +537,7 @@ console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnel
                         onClick={() => removePortRow(idx)}
                         disabled={portMappings.length <= 1}
                         className="p-1.5 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-600 disabled:opacity-30 transition"
+                        title="Remove Port"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -564,37 +566,78 @@ console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is actively maintaining tunnel
             className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-sm"
           >
             <Download className={`w-4 h-4 ${downloading ? 'animate-bounce' : ''}`} />
-            {downloading ? 'Generating ZIP...' : 'Download Configured Agent ZIP'}
+            {downloading ? 'Generating ZIP...' : `Download Configured Agent ZIP (${portMappings.length} Ports)`}
           </button>
         </div>
       </div>
 
-      {/* DNS Setup Suggestion Box */}
-      <div className="bg-amber-50/60 border border-amber-200/80 rounded-2xl p-5 space-y-3">
-        <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
-          <Info className="w-4 h-4 text-amber-600" />
-          DNS SETUP SUGGESTION FOR CUSTOM DOMAINS
+      {/* Dynamic DNS Setup Suggestion Box Based on User Added Domains */}
+      <div className="bg-amber-50/70 border border-amber-200/90 rounded-2xl p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+            <Info className="w-4 h-4 text-amber-600 shrink-0" />
+            DNS SETUP SUGGESTIONS FOR YOUR CONFIGURED DOMAINS
+          </div>
+          <span className="text-[11px] text-amber-800 font-medium">
+            Add these DNS A-Records at Hostinger, Cloudflare, or GoDaddy
+          </span>
         </div>
+
         <p className="text-xs text-amber-800 leading-relaxed">
-          To point your custom domains to Turnal, add this <strong>A Record</strong> in your DNS provider (Hostinger, Cloudflare, GoDaddy):
+          For your configured custom domains/subdomains to reach your local PC via Turnal, add the following <strong>A Records</strong> in your domain registrar DNS management panel:
         </p>
-        <div className="border border-amber-200 rounded-xl overflow-hidden bg-white/80">
+
+        <div className="border border-amber-200 rounded-xl overflow-hidden bg-white shadow-xs">
           <table className="w-full text-left text-xs font-mono">
-            <thead className="bg-amber-100/50 text-[11px] text-amber-900 font-bold border-b border-amber-200">
+            <thead className="bg-amber-100/60 text-[11px] text-amber-950 font-bold border-b border-amber-200">
               <tr>
-                <th className="p-2.5">TYPE</th>
-                <th className="p-2.5">NAME / HOST</th>
-                <th className="p-2.5">POINTS TO (VALUE)</th>
-                <th className="p-2.5">RECOMMENDED TTL</th>
+                <th className="p-3">YOUR SERVICE</th>
+                <th className="p-3">RECORD TYPE</th>
+                <th className="p-3">HOST / NAME</th>
+                <th className="p-3">POINTS TO (SERVER IP)</th>
+                <th className="p-3">TTL</th>
+                <th className="p-3 text-right">COPY</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-amber-100">
-              <tr>
-                <td className="p-2.5 font-bold text-amber-900">A</td>
-                <td className="p-2.5 text-sky-800 font-bold">@ / app / api / *</td>
-                <td className="p-2.5 font-bold text-purple-700">13.62.54.247</td>
-                <td className="p-2.5 text-slate-600">300 (5 mins)</td>
-              </tr>
+            <tbody className="divide-y divide-amber-100 text-slate-700">
+              {portMappings.map((p, idx) => {
+                const domain = p.customDomain || `${p.subdomain}.skyranksolution.com`;
+                const hostName = p.subdomain || '@';
+
+                return (
+                  <tr key={p.id} className="hover:bg-amber-50/40 transition">
+                    <td className="p-3 font-sans font-semibold text-slate-900">
+                      {p.name} <span className="text-xs font-mono text-sky-700 font-bold">(Port {p.port})</span>
+                    </td>
+                    <td className="p-3">
+                      <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold text-[11px]">
+                        A
+                      </span>
+                    </td>
+                    <td className="p-3 text-sky-800 font-bold">{hostName}</td>
+                    <td className="p-3 font-bold text-purple-700">13.62.54.247</td>
+                    <td className="p-3 text-slate-500">300 (5 mins)</td>
+                    <td className="p-3 text-right">
+                      <button
+                        onClick={() => handleCopyText(`A Record: Name=${hostName}, Value=13.62.54.247`, `dns-${idx}`)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-100/80 hover:bg-amber-200 text-amber-900 text-[11px] font-sans font-semibold transition"
+                      >
+                        {copiedKey === `dns-${idx}` ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3 text-amber-700" />
+                            Copy Record
+                          </>
+                        )}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
