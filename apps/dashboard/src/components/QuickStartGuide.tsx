@@ -24,13 +24,13 @@ import {
   Power
 } from 'lucide-react';
 
-interface PortMapping {
+export interface PortMapping {
   id: string;
   name: string;
   port: string;
   subdomain: string;
   customDomain: string;
-  status?: 'PENDING_APPROVAL' | 'ONLINE' | 'OFFLINE' | 'REJECTED';
+  status?: 'PENDING_APPROVAL' | 'ONLINE' | 'OFFLINE' | 'REJECTED' | 'CONFIGURED';
 }
 
 interface QuickStartGuideProps {
@@ -39,9 +39,9 @@ interface QuickStartGuideProps {
 }
 
 export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964cbb3d1ed62d86464df1b9', defaultPort = '3000' }: QuickStartGuideProps) {
-  // Clean single example row initially; user can dynamically add as many as they want
+  // Clean single example row initially configured
   const [portMappings, setPortMappings] = useState<PortMapping[]>([
-    { id: '1', name: 'My Web App', port: defaultPort || '3000', subdomain: 'app', customDomain: 'app.skyranksolution.com', status: 'PENDING_APPROVAL' },
+    { id: '1', name: 'My Web App', port: defaultPort || '3000', subdomain: 'app', customDomain: 'app.skyranksolution.com', status: 'CONFIGURED' },
   ]);
 
   const [saving, setSaving] = useState(false);
@@ -82,7 +82,7 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
         port: nextPort,
         subdomain: `service-${nextPort}`,
         customDomain: `service-${nextPort}.skyranksolution.com`,
-        status: 'PENDING_APPROVAL'
+        status: 'CONFIGURED'
       }
     ]);
   };
@@ -139,7 +139,7 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
       if (res.success) {
         setFeedback({
           type: 'success',
-          text: `Successfully submitted ${items.length} port tunnel requests for Admin approval!`
+          text: `Configured ${items.length} port tunnel requests! Run the agent ZIP on your PC to initiate live connections.`
         });
         refreshTunnels();
       } else {
@@ -163,12 +163,11 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
       const activeKey = apiKey || localStorage.getItem('turnal_token') || 'trk_live_43021d2c8ab8a30c79ed6402964cbb3d1ed62d86464df1b9';
 
       const tunnelConfigs = portMappings.map(p => ({
-        id: p.id,
         name: p.name,
         port: parseInt(p.port, 10) || 3000,
-        subdomain: p.subdomain,
+        subdomain: p.subdomain || 'app',
         domain: p.customDomain || `${p.subdomain}.skyranksolution.com`,
-        status: p.status || 'PENDING_APPROVAL'
+        status: p.status || 'CONFIGURED'
       }));
 
       const configFileContent = JSON.stringify({
@@ -189,7 +188,7 @@ echo ========================================================
 echo.
 echo [1/3] Loading configured tunnels from config.json...
 echo [2/3] Connecting to Turnal Edge Server (13.62.54.247:8080)...
-echo [3/3] Checking Admin Approval and SSL status...
+echo [3/3] Initiating Approval and Live SSL Routing...
 echo.
 
 :loop
@@ -268,9 +267,10 @@ if (!WS) {
 }
 
 function createTunnelConnection(tunnel) {
-  console.log(\`\\x1b[33m⏳ [Port \${tunnel.port}] Connecting tunnel for \${tunnel.domain}...\\x1b[0m\`);
+  console.log(\`\\x1b[33m⏳ [Port \${tunnel.port}] Requesting tunnel for \${tunnel.domain} -> localhost:\${tunnel.port}...\\x1b[0m\`);
 
   let ws;
+  let isApproved = false;
   const activeRequests = new Map();
 
   try {
@@ -307,6 +307,7 @@ function createTunnelConnection(tunnel) {
 
       if (msg.type === 'AUTH_ACK') {
         // 2. Authenticated -> Send TUNNEL_REGISTER_REQ
+        console.log(\`\\x1b[36m[Port \${tunnel.port}] Authenticated with Turnal Edge. Registering tunnel...\\x1b[0m\`);
         send({
           type: 'TUNNEL_REGISTER_REQ',
           projectName: tunnel.name,
@@ -318,9 +319,28 @@ function createTunnelConnection(tunnel) {
           timestamp: Date.now()
         });
       } else if (msg.type === 'TUNNEL_REGISTER_ACK') {
+        isApproved = true;
+        console.log('\\x1b[32m%s\\x1b[0m', '--------------------------------------------------------');
         console.log(\`\\x1b[32m✔ [Port \${tunnel.port}] LIVE & ONLINE: https://\${tunnel.domain} -> http://localhost:\${tunnel.port}\\x1b[0m\`);
+        console.log('\\x1b[32m%s\\x1b[0m', '--------------------------------------------------------');
       } else if (msg.type === 'TUNNEL_REGISTER_FAIL') {
-        console.log(\`\\x1b[31m❌ [Port \${tunnel.port}] Registration issue: \${msg.reason || 'Pending Admin Approval'}\\x1b[0m\`);
+        console.log(\`\\x1b[33m⏳ [Port \${tunnel.port}] Waiting for Admin Approval in Dashboard...\\x1b[0m\`);
+        console.log(\`\\x1b[90m👉 Admin Portal: https://dashboard.skyranksolution.com/admin\\x1b[0m\`);
+        // Poll for approval every 5 seconds
+        setTimeout(() => {
+          if (!isApproved) {
+            send({
+              type: 'TUNNEL_REGISTER_REQ',
+              projectName: tunnel.name,
+              subdomain: tunnel.subdomain,
+              customDomain: tunnel.domain,
+              localTargetPort: tunnel.port,
+              localTargetHost: 'localhost',
+              protocol: 'http',
+              timestamp: Date.now()
+            });
+          }
+        }, 5000);
       } else if (msg.type === 'HEARTBEAT_PING') {
         // Reply to keep-alive heartbeat
         send({
@@ -406,12 +426,12 @@ function createTunnelConnection(tunnel) {
   });
 
   ws.addEventListener('close', () => {
-    console.log(\`\\x1b[33m[Port \${tunnel.port}] Disconnected from server. Reconnecting in 5 seconds...\\x1b[0m\`);
+    console.log(\`\\x1b[33m[Port \${tunnel.port}] Reconnecting in 5 seconds...\\x1b[0m\`);
     setTimeout(() => createTunnelConnection(tunnel), 5000);
   });
 
   ws.addEventListener('error', () => {
-    // ws close will trigger reconnect
+    // handled by close listener
   });
 }
 
@@ -598,7 +618,8 @@ console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is maintaining persistent conn
             <tbody className="divide-y divide-slate-100">
               {portMappings.map((row, idx) => {
                 const isOnline = row.status === 'ONLINE';
-                const isPending = row.status === 'PENDING_APPROVAL' || row.status === 'OFFLINE' || !row.status;
+                const isPending = row.status === 'PENDING_APPROVAL';
+                const isConfigured = row.status === 'CONFIGURED' || row.status === 'OFFLINE' || !row.status;
                 const isRejected = row.status === 'REJECTED';
 
                 return (
@@ -642,19 +663,25 @@ console.log('\\x1b[32m%s\\x1b[0m', '\\n🚀 Agent is maintaining persistent conn
                     </td>
                     <td className="p-3">
                       {isOnline && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                          Online
+                          Live & Online
                         </span>
                       )}
                       {isPending && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-bold">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[11px] font-bold">
                           <Clock className="w-3 h-3 text-amber-600" />
-                          Pending Approval
+                          Waiting Approval
+                        </span>
+                      )}
+                      {isConfigured && !isOnline && !isPending && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-[11px] font-bold">
+                          <Zap className="w-3 h-3 text-sky-600" />
+                          Ready (Run Agent)
                         </span>
                       )}
                       {isRejected && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold">
                           <XCircle className="w-3 h-3 text-rose-600" />
                           Rejected
                         </span>
