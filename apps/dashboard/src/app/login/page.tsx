@@ -28,9 +28,15 @@ export default function LoginPage() {
     if (res.success && res.data?.token) {
       setToken(res.data.token);
       localStorage.setItem('turnal_user', JSON.stringify(res.data.user));
-      router.push('/');
+      if (res.data.user?.role === 'ADMIN' || res.data.user?.role === 'admin') {
+        localStorage.setItem('turnal_admin_token', res.data.token);
+        localStorage.setItem('turnal_admin_user', JSON.stringify(res.data.user));
+        router.push('/admin');
+      } else {
+        router.push('/');
+      }
     } else {
-      setError(res.error?.message || 'Invalid email or password');
+      setError(res.error?.message || 'Invalid email, username, or password');
     }
   };
 
@@ -58,16 +64,16 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
-              Email Address
+              Email Address or Username
             </label>
             <div className="relative">
               <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
               <input
-                type="email"
+                type="text"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="developer@example.com"
+                placeholder="developer@example.com or admin"
                 className="w-full bg-[#090d16] border border-[#1e293b] rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
               />
             </div>
