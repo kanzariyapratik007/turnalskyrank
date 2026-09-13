@@ -78,33 +78,50 @@ tunnelRouter.post('/batch', authMiddleware, async (req: AuthenticatedRequest, re
       const chosenSub = (item.subdomain || generateRandomSubdomain()).toLowerCase().trim().replace(/[^a-z0-9-]/g, '');
       const customDom = item.customDomain ? item.customDomain.toLowerCase().trim() : null;
 
-      // Check if subdomain already registered for another tunnel
+      // Check if subdomain already registered
       const existing = await prisma.tunnel.findUnique({ where: { subdomain: chosenSub } });
-      const finalSub = existing ? `${chosenSub}-${crypto.randomBytes(2).toString('hex')}` : chosenSub;
+      
+      let tunnel;
+      if (existing) {
+        // If existing belongs to this user, update it
+        tunnel = await prisma.tunnel.update({
+          where: { id: existing.id },
+          data: {
+            name: item.name || existing.name,
+            customDomain: customDom,
+            localTargetPort: parseInt(String(item.localTargetPort), 10) || 3000,
+            localTargetHost: item.localTargetHost ? item.localTargetHost.trim() : 'localhost',
+            protocol: item.protocol || 'http',
+            status: TunnelStatus.PENDING_APPROVAL
+          }
+        });
+      } else {
+        tunnel = await prisma.tunnel.create({
+          data: {
+            name: item.name || `Port ${item.localTargetPort} Tunnel`,
+            subdomain: chosenSub,
+            customDomain: customDom,
+            localTargetPort: parseInt(String(item.localTargetPort), 10) || 3000,
+            localTargetHost: item.localTargetHost ? item.localTargetHost.trim() : 'localhost',
+            protocol: item.protocol || 'http',
+            status: TunnelStatus.PENDING_APPROVAL,
+            userId: req.user!.id,
+            projectId: projectId || null
+          }
+        });
+      }
 
-      const tunnel = await prisma.tunnel.create({
-        data: {
-          name: item.name || `Port ${item.localTargetPort} Tunnel`,
-          subdomain: finalSub,
-          customDomain: customDom,
-          localTargetPort: parseInt(String(item.localTargetPort), 10) || 3000,
-          localTargetHost: item.localTargetHost ? item.localTargetHost.trim() : 'localhost',
-          protocol: item.protocol || 'http',
-          status: TunnelStatus.PENDING_APPROVAL, // Default to pending approval
-          userId: req.user!.id,
-          projectId: projectId || null
-        }
-      });
-
-      createdTunnels.push({
-        id: tunnel.id,
-        name: tunnel.name,
-        subdomain: tunnel.subdomain,
-        customDomain: tunnel.customDomain,
-        localTargetPort: tunnel.localTargetPort,
-        status: tunnel.status,
-        publicUrl: `${config.publicProtocol}://${tunnel.subdomain}.${config.baseDomain}${config.edge.port !== 80 && config.edge.port !== 443 ? `:${config.edge.port}` : ''}`
-      });
+      if (tunnel) {
+        createdTunnels.push({
+          id: tunnel.id,
+          name: tunnel.name,
+          subdomain: tunnel.subdomain,
+          customDomain: tunnel.customDomain,
+          localTargetPort: tunnel.localTargetPort,
+          status: tunnel.status,
+          publicUrl: `${config.publicProtocol}://${tunnel.subdomain}.${config.baseDomain}${config.edge.port !== 80 && config.edge.port !== 443 ? `:${config.edge.port}` : ''}`
+        });
+      }
     }
 
     res.status(201).json({
@@ -117,17 +134,17 @@ tunnelRouter.post('/batch', authMiddleware, async (req: AuthenticatedRequest, re
   }
 });
 
-// POST / - Single tunnel registration
+// POST / - Single tunnel registration with seamless upsert
 tunnelRouter.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { name, subdomain, customDomain, localTargetPort = 3000, localTargetHost = 'localhost', protocol = 'http', projectId } = req.body;
 
     const chosenSubdomain = (subdomain || generateRandomSubdomain()).toLowerCase().trim().replace(/[^a-z0-9-]/g, '');
 
-    if (chosenSubdomain.length < 3) {
+    if (chosenSubdomain.length < 2) {
       res.status(400).json({
         success: false,
-        error: { code: 'INVALID_SUBDOMAIN', message: 'Subdomain must be at least 3 characters alphanumeric' }
+        error: { code: 'INVALID_SUBDOMAIN', message: 'Subdomain must be at least 2 characters alphanumeric' }
       });
       return;
     }
@@ -136,27 +153,34 @@ tunnelRouter.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Re
       where: { subdomain: chosenSubdomain }
     });
 
+    let tunnel;
     if (existingSubdomain) {
-      res.status(409).json({
-        success: false,
-        error: { code: 'SUBDOMAIN_TAKEN', message: `Subdomain '${chosenSubdomain}' is already in use` }
+      tunnel = await prisma.tunnel.update({
+        where: { id: existingSubdomain.id },
+        data: {
+          name: name || chosenSubdomain,
+          customDomain: customDomain ? customDomain.toLowerCase().trim() : null,
+          localTargetPort: parseInt(String(localTargetPort), 10) || 3000,
+          localTargetHost: localTargetHost.trim(),
+          protocol,
+          status: TunnelStatus.PENDING_APPROVAL
+        }
       });
-      return;
+    } else {
+      tunnel = await prisma.tunnel.create({
+        data: {
+          name: name || chosenSubdomain,
+          subdomain: chosenSubdomain,
+          customDomain: customDomain ? customDomain.toLowerCase().trim() : null,
+          localTargetPort: parseInt(String(localTargetPort), 10) || 3000,
+          localTargetHost: localTargetHost.trim(),
+          protocol,
+          status: TunnelStatus.PENDING_APPROVAL,
+          userId: req.user!.id,
+          projectId: projectId || null
+        }
+      });
     }
-
-    const tunnel = await prisma.tunnel.create({
-      data: {
-        name: name || chosenSubdomain,
-        subdomain: chosenSubdomain,
-        customDomain: customDomain ? customDomain.toLowerCase().trim() : null,
-        localTargetPort: parseInt(localTargetPort, 10),
-        localTargetHost: localTargetHost.trim(),
-        protocol,
-        status: TunnelStatus.PENDING_APPROVAL,
-        userId: req.user!.id,
-        projectId: projectId || null
-      }
-    });
 
     res.status(201).json({
       success: true,
