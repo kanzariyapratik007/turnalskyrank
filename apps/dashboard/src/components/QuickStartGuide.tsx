@@ -114,10 +114,27 @@ export function QuickStartGuide({ apiKey = 'trk_live_43021d2c8ab8a30c79ed6402964
         protocol: 'http'
       }));
 
-      const res = await fetchApi('/api/tunnels/batch', {
+      let res = await fetchApi('/api/tunnels/batch', {
         method: 'POST',
         body: JSON.stringify({ items })
       });
+
+      // Fallback: If /api/tunnels/batch returns 404, register each tunnel individually via /api/tunnels
+      if (!res.success) {
+        let createdCount = 0;
+        for (const item of items) {
+          const singleRes = await fetchApi('/api/tunnels', {
+            method: 'POST',
+            body: JSON.stringify(item)
+          });
+          if (singleRes.success || (singleRes.error && singleRes.error.code === 'SUBDOMAIN_TAKEN')) {
+            createdCount++;
+          }
+        }
+        if (createdCount > 0) {
+          res = { success: true };
+        }
+      }
 
       if (res.success) {
         setFeedback({
