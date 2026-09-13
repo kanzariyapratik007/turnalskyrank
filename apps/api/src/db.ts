@@ -231,6 +231,21 @@ export const prisma = {
       dbState.tunnels = dbState.tunnels.filter(t => t.id !== where.id);
       saveDatabase(dbState);
       return { id: where.id };
+    },
+    deleteMany: async ({ where }: any = {}) => {
+      dbState = loadDatabase();
+      let count = 0;
+      if (where?.id?.in) {
+        const set = new Set(where.id.in);
+        const prevLen = dbState.tunnels.length;
+        dbState.tunnels = dbState.tunnels.filter(t => !set.has(t.id));
+        count = prevLen - dbState.tunnels.length;
+      } else if (where?.id) {
+        dbState.tunnels = dbState.tunnels.filter(t => t.id !== where.id);
+        count = 1;
+      }
+      saveDatabase(dbState);
+      return { count };
     }
   },
 
@@ -290,6 +305,22 @@ export const prisma = {
       dbState.domains = dbState.domains.filter(d => d.id !== where.id);
       saveDatabase(dbState);
       return { id: where.id };
+    },
+    deleteMany: async ({ where }: any = {}) => {
+      dbState = loadDatabase();
+      let count = 0;
+      if (where?.targetTunnelId?.in) {
+        const set = new Set(where.targetTunnelId.in);
+        const prevLen = dbState.domains.length;
+        dbState.domains = dbState.domains.filter(d => !set.has(d.targetTunnelId));
+        count = prevLen - dbState.domains.length;
+      } else if (where?.targetTunnelId) {
+        const prevLen = dbState.domains.length;
+        dbState.domains = dbState.domains.filter(d => d.targetTunnelId !== where.targetTunnelId);
+        count = prevLen - dbState.domains.length;
+      }
+      saveDatabase(dbState);
+      return { count };
     }
   },
 

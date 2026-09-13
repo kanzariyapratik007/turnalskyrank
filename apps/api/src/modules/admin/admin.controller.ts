@@ -224,3 +224,43 @@ adminRouter.get('/stats', authMiddleware, async (req: AuthenticatedRequest, res:
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: error.message } });
   }
 });
+
+// DELETE /api/admin/tunnels/:id - Permanently delete a tunnel record
+adminRouter.delete('/tunnels/:id', authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    await prisma.domain.deleteMany({ where: { targetTunnelId: id } });
+    await prisma.tunnel.delete({ where: { id } });
+    res.json({ success: true, message: 'Tunnel deleted successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: error.message } });
+  }
+});
+
+// POST /api/admin/tunnels/clear-duplicates - Clear duplicate temporary agent tunnels
+adminRouter.post('/tunnels/clear-duplicates', authMiddleware, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const tunnels = await prisma.tunnel.findMany({ orderBy: { createdAt: 'desc' } });
+    const seen = new Set<string>();
+    const toDelete: string[] = [];
+
+    for (const t of tunnels) {
+      const key = `${t.userId}_${t.subdomain}_${t.customDomain || ''}_${t.localTargetPort}`;
+      if (seen.has(key)) {
+        toDelete.push(t.id);
+      } else {
+        seen.add(key);
+      }
+    }
+
+    if (toDelete.length > 0) {
+      await prisma.domain.deleteMany({ where: { targetTunnelId: { in: toDelete } } });
+      await prisma.tunnel.deleteMany({ where: { id: { in: toDelete } } });
+    }
+
+    res.json({ success: true, message: `Cleaned up ${toDelete.length} duplicate/stale tunnel records.` });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: error.message } });
+  }
+});
+

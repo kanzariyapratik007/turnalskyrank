@@ -14,7 +14,8 @@ import {
   AlertCircle,
   RefreshCw,
   ExternalLink,
-  Layers
+  Layers,
+  Trash2
 } from 'lucide-react';
 
 interface PendingTunnel {
@@ -31,6 +32,7 @@ interface PendingTunnel {
   userEmail: string;
   createdAt: string;
   approvedAt?: string;
+  approvedBy?: string;
   rejectionReason?: string;
 }
 
@@ -41,55 +43,56 @@ export default function AdminApprovalsPage() {
   const [tunnels, setTunnels] = useState<PendingTunnel[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const handleAdminLogout = () => {
-    localStorage.removeItem('turnal_admin_token');
-    localStorage.removeItem('turnal_admin_user');
-    router.push('/admin/login');
-  };
-
-  const getAdminAuthHeaders = () => {
-    const adminToken =
-      localStorage.getItem('turnal_admin_token') ||
-      localStorage.getItem('turnal_token') ||
-      'admin_master_super_secret_token_turnal';
-    return { Authorization: `Bearer ${adminToken}` };
+  const getAdminAuthHeaders = (): Record<string, string> => {
+    if (typeof window === 'undefined') return {};
+    const token = localStorage.getItem('turnal_token') || 'admin_master_super_secret_token_turnal';
+    return {
+      Authorization: `Bearer ${token}`
+    };
   };
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const headers = getAdminAuthHeaders();
       const [tunnelsRes, statsRes] = await Promise.all([
-        fetchApi('/api/admin/tunnels/pending', { headers }),
-        fetchApi('/api/admin/stats', { headers })
+        fetchApi('/api/admin/tunnels/pending', { headers: getAdminAuthHeaders() }),
+        fetchApi('/api/admin/stats', { headers: getAdminAuthHeaders() })
       ]);
 
-      if (tunnelsRes.error?.code === 'FORBIDDEN' || tunnelsRes.error?.code === 'UNAUTHORIZED') {
-        router.push('/admin/login');
-        return;
-      }
-
-      if (tunnelsRes.success && tunnelsRes.data) {
+      if (tunnelsRes.success && Array.isArray(tunnelsRes.data)) {
         setTunnels(tunnelsRes.data);
       }
       if (statsRes.success && statsRes.data) {
         setStats(statsRes.data);
       }
     } catch (err: any) {
-      console.error('Failed to load admin data:', err);
+      console.error('Failed to load admin telemetry', err);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleAdminLogout = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('turnal_token');
+      localStorage.removeItem('turnal_user');
+    }
+    router.push('/admin/login');
+  };
+
   useEffect(() => {
     loadData();
   }, []);
+
+  const isApproved = (t: PendingTunnel) =>
+    t.status === 'ONLINE' || t.status === 'APPROVED' || (Boolean(t.approvedAt) && t.status !== 'REJECTED');
+  const isRejected = (t: PendingTunnel) => t.status === 'REJECTED';
+  const isPending = (t: PendingTunnel) => !isApproved(t) && !isRejected(t);
 
   const handleApprove = async (id: string) => {
     setActionLoading(id);
@@ -134,6 +137,46 @@ export default function AdminApprovalsPage() {
     }
   };
 
+  const handleDelete = async (id: string) => {
+    setActionLoading(id);
+    setFeedbackMessage(null);
+    try {
+      const res = await fetchApi(`/api/admin/tunnels/${id}`, {
+        method: 'DELETE',
+        headers: getAdminAuthHeaders()
+      });
+      if (res.success) {
+        setFeedbackMessage({ type: 'success', text: 'Tunnel deleted permanently.' });
+        loadData();
+      } else {
+        setFeedbackMessage({ type: 'error', text: res.error?.message || 'Failed to delete tunnel' });
+      }
+    } catch (err: any) {
+      setFeedbackMessage({ type: 'error', text: err.message });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleClearDuplicates = async () => {
+    setLoading(true);
+    setFeedbackMessage(null);
+    try {
+      const res = await fetchApi('/api/admin/tunnels/clear-duplicates', {
+        method: 'POST',
+        headers: getAdminAuthHeaders()
+      });
+      if (res.success) {
+        setFeedbackMessage({ type: 'success', text: (res as any).message || 'Duplicate tunnels cleaned successfully.' });
+        loadData();
+      }
+    } catch (err: any) {
+      setFeedbackMessage({ type: 'error', text: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleBatchDecision = async (action: 'APPROVE' | 'REJECT') => {
     if (selectedIds.length === 0) return;
     setLoading(true);
@@ -161,9 +204,9 @@ export default function AdminApprovalsPage() {
   };
 
   const filteredTunnels = tunnels.filter(t => {
-    if (filter === 'PENDING') return t.status === 'PENDING_APPROVAL' || t.status === 'OFFLINE' || t.status === 'CONFIGURED' || !t.status;
-    if (filter === 'APPROVED') return t.status === 'ONLINE';
-    if (filter === 'REJECTED') return t.status === 'REJECTED';
+    if (filter === 'PENDING') return isPending(t);
+    if (filter === 'APPROVED') return isApproved(t);
+    if (filter === 'REJECTED') return isRejected(t);
     return true;
   });
 
@@ -178,6 +221,10 @@ export default function AdminApprovalsPage() {
       setSelectedIds(filteredTunnels.map(t => t.id));
     }
   };
+
+  const pendingCount = tunnels.filter(isPending).length;
+  const approvedCount = tunnels.filter(isApproved).length;
+  const rejectedCount = tunnels.filter(isRejected).length;
 
   return (
     <div className="space-y-6">
@@ -194,7 +241,15 @@ export default function AdminApprovalsPage() {
               Inspect incoming client tunnel requests across multiple local ports. Grant selective approval, issue instant SSL routing, or reject unwanted port forwards.
             </p>
           </div>
-          <div className="flex items-center gap-2 self-start sm:self-center">
+          <div className="flex items-center gap-2 self-start sm:self-center flex-wrap">
+            <button
+              onClick={handleClearDuplicates}
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition"
+              title="Clean up duplicate/old test tunnel records"
+            >
+              <Layers className="w-3.5 h-3.5 text-indigo-400" />
+              Clean Duplicates
+            </button>
             <button
               onClick={loadData}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
@@ -216,24 +271,24 @@ export default function AdminApprovalsPage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-slate-800">
           <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-4">
             <div className="text-xs text-slate-400 font-medium">Total Tunnels</div>
-            <div className="text-2xl font-bold text-white mt-1">{stats?.totalTunnels ?? tunnels.length}</div>
+            <div className="text-2xl font-bold text-white mt-1">{tunnels.length}</div>
           </div>
           <div className="bg-emerald-950/40 border border-emerald-800/40 rounded-2xl p-4">
             <div className="text-xs text-emerald-400 font-medium">Active & Approved</div>
             <div className="text-2xl font-bold text-emerald-300 mt-1">
-              {stats?.activeTunnelsCount ?? tunnels.filter(t => t.status === 'ONLINE').length}
+              {approvedCount}
             </div>
           </div>
           <div className="bg-amber-950/40 border border-amber-800/40 rounded-2xl p-4">
             <div className="text-xs text-amber-400 font-medium">Pending Approvals</div>
             <div className="text-2xl font-bold text-amber-300 mt-1">
-              {tunnels.filter(t => t.status === 'PENDING_APPROVAL' || t.status === 'OFFLINE' || t.status === 'CONFIGURED' || !t.status).length}
+              {pendingCount}
             </div>
           </div>
           <div className="bg-rose-950/40 border border-rose-800/40 rounded-2xl p-4">
             <div className="text-xs text-rose-400 font-medium">Rejected Tunnels</div>
             <div className="text-2xl font-bold text-rose-300 mt-1">
-              {stats?.rejectedTunnelsCount ?? tunnels.filter(t => t.status === 'REJECTED').length}
+              {rejectedCount}
             </div>
           </div>
         </div>
@@ -335,9 +390,10 @@ export default function AdminApprovalsPage() {
                 </tr>
               ) : (
                 filteredTunnels.map(tunnel => {
-                  const isPending = tunnel.status === 'PENDING_APPROVAL' || tunnel.status === 'OFFLINE';
-                  const isApproved = tunnel.status === 'ONLINE';
-                  const isRejected = tunnel.status === 'REJECTED';
+                  const approved = isApproved(tunnel);
+                  const rejected = isRejected(tunnel);
+                  const pending = isPending(tunnel);
+                  const isOnline = tunnel.status === 'ONLINE';
                   const targetDomain = tunnel.customDomain || `${tunnel.subdomain}.skyranksolution.com`;
 
                   return (
@@ -379,27 +435,31 @@ export default function AdminApprovalsPage() {
                         </div>
                       </td>
                       <td className="p-4">
-                        {isApproved && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                            Approved (Online)
+                        {approved && (
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold border ${
+                            isOnline 
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}>
+                            <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-blue-500'}`}></span>
+                            {isOnline ? 'Approved (Online)' : 'Approved (Waiting)'}
                           </span>
                         )}
-                        {isPending && (
+                        {pending && (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold">
                             <Clock className="w-3 h-3 text-amber-600" />
                             Pending Approval
                           </span>
                         )}
-                        {isRejected && (
+                        {rejected && (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold">
                             <XCircle className="w-3 h-3 text-rose-600" />
                             Rejected
                           </span>
                         )}
                       </td>
-                      <td className="p-4 text-right space-x-2">
-                        {!isApproved && (
+                      <td className="p-4 text-right space-x-1.5 whitespace-nowrap">
+                        {!approved && (
                           <button
                             disabled={actionLoading === tunnel.id}
                             onClick={() => handleApprove(tunnel.id)}
@@ -409,7 +469,7 @@ export default function AdminApprovalsPage() {
                             {actionLoading === tunnel.id ? 'Approving...' : 'Approve'}
                           </button>
                         )}
-                        {!isRejected && (
+                        {!rejected && (
                           <button
                             disabled={actionLoading === tunnel.id}
                             onClick={() => handleReject(tunnel.id)}
@@ -419,7 +479,7 @@ export default function AdminApprovalsPage() {
                             Reject
                           </button>
                         )}
-                        {isApproved && (
+                        {approved && (
                           <a
                             href={`https://${targetDomain}`}
                             target="_blank"
@@ -430,6 +490,14 @@ export default function AdminApprovalsPage() {
                             Visit
                           </a>
                         )}
+                        <button
+                          disabled={actionLoading === tunnel.id}
+                          onClick={() => handleDelete(tunnel.id)}
+                          className="inline-flex items-center p-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-600 border border-slate-200 text-xs transition"
+                          title="Delete tunnel permanently"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </td>
                     </tr>
                   );
