@@ -153,6 +153,13 @@ wss.on('connection', (socket: WebSocket, req: http.IncomingMessage) => {
 
         registry.register(activeSession);
 
+        // Notify API of live online status
+        fetch(`${config.api.url}/api/tunnels/${activeSession.tunnelId}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'ONLINE' })
+        }).catch(() => {});
+
         socket.off('message', handshakeListener);
 
         const publicUrl = `${config.publicProtocol}://${chosenSubdomain}.${config.baseDomain}${config.edge.port !== 80 && config.edge.port !== 443 ? `:${config.edge.port}` : ''}`;
@@ -186,7 +193,13 @@ wss.on('connection', (socket: WebSocket, req: http.IncomingMessage) => {
 
   socket.on('close', () => {
     if (activeSession) {
-      registry.unregister(activeSession.tunnelId);
+      const tid = activeSession.tunnelId;
+      registry.unregister(tid);
+      fetch(`${config.api.url}/api/tunnels/${tid}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'OFFLINE' })
+      }).catch(() => {});
       console.log(`🔴 [Turnal Edge] Tunnel agent disconnected for subdomain '${activeSession.subdomain}'`);
     }
   });

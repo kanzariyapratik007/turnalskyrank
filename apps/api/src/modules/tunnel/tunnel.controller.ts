@@ -532,3 +532,25 @@ tunnelRouter.post('/resolve-host', async (req, res): Promise<void> => {
     res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: error.message } });
   }
 });
+
+// POST /:id/status - Update tunnel connection status (ONLINE/OFFLINE) from Edge
+tunnelRouter.post('/:id/status', async (req: any, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const tunnel = await prisma.tunnel.findUnique({ where: { id } });
+    if (tunnel) {
+      await prisma.tunnel.update({
+        where: { id },
+        data: {
+          status: status === 'ONLINE' ? TunnelStatus.ONLINE : TunnelStatus.OFFLINE,
+          lastHeartbeatAt: new Date()
+        } as any
+      });
+    }
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: error.message } });
+  }
+});
+
